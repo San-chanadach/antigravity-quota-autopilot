@@ -1,0 +1,234 @@
+{
+  "name": "antigravity-quota-autopilot",
+  "displayName": "Antigravity Quota Monitor & Autopilot",
+  "description": "Real-time AI model limit & quota monitor, automated activity logger, and hands-free auto-accept autopilot for Google Antigravity IDE.",
+  "version": "1.1.0",
+  "publisher": "san-chanadach",
+  "author": "San Chanadach",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/San-chanadach/antigravity-quota-autopilot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/San-chanadach/antigravity-quota-autopilot/issues"
+  },
+  "homepage": "https://github.com/San-chanadach/antigravity-quota-autopilot#readme",
+  "icon": "assets/icon.png",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization",
+    "Productivity"
+  ],
+  "keywords": [
+    "antigravity",
+    "gemini",
+    "claude",
+    "gpt",
+    "quota",
+    "limit",
+    "monitor",
+    "autopilot",
+    "auto-accept",
+    "status bar",
+    "tracker"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "antigravityLimitMonitor.refresh",
+        "title": "Refresh Model Limits",
+        "category": "Limit Monitor",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "antigravityLimitMonitor.openQuickMenu",
+        "title": "Open Limit Monitor Quick Menu",
+        "category": "Limit Monitor"
+      },
+      {
+        "command": "antigravityLimitMonitor.showDashboard",
+        "title": "Show Limit Monitor Dashboard",
+        "category": "Limit Monitor",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "antigravityLimitMonitor.toggleDisplayMode",
+        "title": "Switch Status Bar Display Mode",
+        "category": "Limit Monitor"
+      },
+      {
+        "command": "antigravityLimitMonitor.showLogs",
+        "title": "Show Limit Monitor Logs",
+        "category": "Limit Monitor",
+        "icon": "$(output)"
+      },
+      {
+        "command": "antigravityLimitMonitor.clearHistory",
+        "title": "Clear Activity History Logs",
+        "category": "Limit Monitor",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "antigravityLimitMonitor.toggleAutoAccept",
+        "title": "Toggle Auto-Accept (ON/OFF)",
+        "category": "Limit Monitor",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "antigravityLimitMonitor.setAutoAcceptChoice",
+        "title": "Set Auto-Accept Option (1: Once / 2: Conversation / 3: Always)",
+        "category": "Limit Monitor",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "antigravityLimitMonitor.openAutoAcceptMenu",
+        "title": "Auto-Accept Status & Options Menu",
+        "category": "Limit Monitor",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "antigravityLimitMonitor.selectOpt1",
+        "title": "Select Auto-Accept Option 1 (Once)",
+        "category": "Limit Monitor"
+      },
+      {
+        "command": "antigravityLimitMonitor.selectOpt2",
+        "title": "Select Auto-Accept Option 2 (In conversation)",
+        "category": "Limit Monitor"
+      },
+      {
+        "command": "antigravityLimitMonitor.selectOpt3",
+        "title": "Select Auto-Accept Option 3 (Always allow)",
+        "category": "Limit Monitor"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "antigravity-limit-monitor",
+          "title": "Model Limits",
+          "icon": "assets/activity-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "antigravity-limit-monitor": [
+        {
+          "id": "antigravityLimitMonitorView",
+          "name": "Usage Limits"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "antigravityLimitMonitor.refresh",
+          "when": "view == antigravityLimitMonitorView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "antigravityLimitMonitor.showDashboard",
+          "when": "view == antigravityLimitMonitorView",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Antigravity Model Limit Monitor",
+      "properties": {
+        "antigravityLimitMonitor.refreshIntervalSeconds": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 3,
+          "maximum": 600,
+          "description": "Interval in seconds to refresh model quota limits from Language Server."
+        },
+        "antigravityLimitMonitor.statusBarFormat": {
+          "type": "string",
+          "enum": [
+            "all",
+            "geminiOnly",
+            "fiveHourOnly",
+            "compact",
+            "smartLowest"
+          ],
+          "enumDescriptions": [
+            "Show both Gemini & Claude 5h limits (e.g. ✨ 57% | 🚀 100%)",
+            "Show Gemini limits only (e.g. ✨ 57% (5h) 69% (W))",
+            "Show only 5-hour limits for active models",
+            "Compact icon with lowest percentage",
+            "Smart mode: automatically highlights the group with the lowest remaining quota"
+          ],
+          "default": "all",
+          "description": "Display format for the status bar item."
+        },
+        "antigravityLimitMonitor.showStatusAlertColors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight status bar text with warning/error colors when quota falls low."
+        },
+        "antigravityLimitMonitor.lowQuotaWarningThreshold": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Show warning notification when any model limit drops below this percentage (0 to disable)."
+        },
+        "antigravityLimitMonitor.autoAccept.pollIntervalMs": {
+          "type": "integer",
+          "default": 800,
+          "minimum": 300,
+          "maximum": 5000,
+          "description": "Polling frequency in milliseconds for auto-accepting steps and terminal commands."
+        },
+        "antigravityLimitMonitor.autoAccept.choice": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3
+          ],
+          "enumDescriptions": [
+            "Option 1: Allow this time (Yes, allow this time)",
+            "Option 2: Allow in this conversation (Yes, in this conversation)",
+            "Option 3: Always allow (Yes, and always allow)"
+          ],
+          "default": 1,
+          "description": "Default permission option preference when auto-accepting prompts."
+        },
+        "antigravityLimitMonitor.autoAccept.enableCdpMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect and attach to CDP port 9333 for permission and retry prompts."
+        },
+        "antigravityLimitMonitor.autoAccept.cdpPort": {
+          "type": "integer",
+          "default": 9333,
+          "description": "Remote debugging port for CDP connection."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3"
+  }
+}

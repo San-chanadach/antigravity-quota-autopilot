@@ -1,0 +1,9 @@
+.vscode/**
+.vscode-test/**
+src/**
+out/**
+autorun_ext/**
+inspect_patterns.ps1
+tsconfig.json
+**/*.map
+*.vsix
