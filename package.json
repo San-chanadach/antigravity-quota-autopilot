@@ -2,10 +2,13 @@
   "name": "antigravity-quota-autopilot",
   "displayName": "Antigravity Quota Monitor & Autopilot",
   "description": "Real-time AI model limit & quota monitor, automated activity logger, and hands-free auto-accept autopilot for Google Antigravity IDE.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "san-chanadach",
   "author": "San Chanadach",
   "license": "MIT",
+  "sponsor": {
+    "url": "https://ko-fi.com/sanchanadach"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/San-chanadach/antigravity-quota-autopilot.git"

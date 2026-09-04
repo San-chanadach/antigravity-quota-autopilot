@@ -1,7 +1,8 @@
 # Antigravity Quota Monitor & Autopilot
 
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.1.0-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.1.1-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
 [![Author: San Chanadach](https://img.shields.io/badge/Author-San%20Chanadach-blue.svg)](https://github.com/San-chanadach)
+[![Ko-fi: Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-ff5e5b?style=flat&logo=ko-fi)](https://ko-fi.com/sanchanadach)
 [![Antigravity IDE: v2.5.5](https://img.shields.io/badge/Antigravity%20IDE-v2.5.5-purple.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript-blue.svg)](https://www.typescriptlang.org/)
@@ -193,6 +194,16 @@ npm run build
 # Package into .vsix file
 npx @vscode/vsce package --no-dependencies
 ```
+
+---
+
+## ☕ Support & Buy Me a Coffee
+
+If you find **Antigravity Quota Monitor & Autopilot** useful and it saves you time, please consider buying me a coffee to support continued development and maintenance!
+
+[![Buy Me a Coffee on Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20on%20Ko--fi-ff5e5b?style=for-the-badge&logo=ko-fi)](https://ko-fi.com/sanchanadach)
+
+Your support is deeply appreciated! ❤️
 
 ---
 
