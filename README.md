@@ -1,124 +1,123 @@
-# Antigravity Quota Monitor & Autopilot
+# Antigravity AI Quota & Auto-Accept Autopilot
 
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.1.1-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.1.2-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
 [![Author: San Chanadach](https://img.shields.io/badge/Author-San%20Chanadach-blue.svg)](https://github.com/San-chanadach)
 [![Ko-fi: Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-ff5e5b?style=flat&logo=ko-fi)](https://ko-fi.com/sanchanadach)
 [![Antigravity IDE: v2.5.5](https://img.shields.io/badge/Antigravity%20IDE-v2.5.5-purple.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/Language-TypeScript-blue.svg)](https://www.typescriptlang.org/)
 
-The all-in-one companion extension for **Google Antigravity IDE (Version: 2.5.5)** — featuring real-time AI model quota monitoring (Gemini & Claude), an automated 1,000-log activity history tracker, and a hands-free **Autopilot (Auto-Accept)** engine for step approvals and terminal commands.
-
----
-
-## Highlights
-
-- **🎯 Antigravity IDE v2.5.5 Verified**: Tested and guaranteed compatible with **Google Antigravity IDE Version: 2.5.5**.
-- **⚡ Hands-Free Autopilot**: Automatically approve agent file changes and run terminal commands with granular safety levels.
-- **📊 Real-Time AI Quotas**: Instant visibility of remaining quotas for Gemini 3.7 / 3.1 Pro / Flash, Claude 3.7 / 3.5 Sonnet, and GPT models across 5-Hour and Weekly rolling windows.
-- **🕒 100% Automated Activity Logger**: Automatically records up to 1,000 turns with prompt snippet tagging, timestamp, and percentage consumed.
-- **🎨 Native Vector UI**: Built using VS Code Codicons and sleek SVGs — zero emoji clutter, seamless dark-mode design.
-- **🔌 Zero Configuration**: Auto-discovers and connects to the local Antigravity Language Server with zero API keys required.
+An all-in-one companion extension designed exclusively for **Google Antigravity IDE (Version: 2.5.5)** — featuring hands-free **Auto-Accept Autopilot** for agent actions, real-time **AI Quota Tracking** (Gemini & Claude), an interactive **Visual Dashboard**, and an automated **1,000-Turn Activity History Logger**.
 
 ---
 
-## Features in Detail
-
-### 1. Hands-Free Autopilot (Auto-Accept)
-
-Tired of clicking "Accept" and "Allow" dozens of times during long agent coding sessions? The built-in Autopilot handles approvals automatically so you can focus on building.
-
-#### 3 Granular Approval Options
-| Option | Name | Best For |
-|---|---|---|
-| **Option 1** | **Allow this time (Once)** | High-security tasks requiring prompt-by-prompt verification. |
-| **Option 2** | **In conversation (Recommended)** | Typical workflows: auto-approves within the current chat session. |
-| **Option 3** | **Always allow (Permanent)** | Unattended, overnight, or autonomous multi-step tasks. |
-
-#### Minimalist Status Bar Integration
-- **Clean Format**: `Gemi:80% | Cl:80% Auto: ON`
-- **1-Click Direct Toggle**: Click the status bar item to toggle Autopilot `ON` ↔ `OFF` instantly.
-- **Mouse Hover Selector**: Hovering over the status bar item opens a rich tooltip where you can switch between Option 1, Option 2, and Option 3 in a single click without opening dialogs.
-
-#### Dual-Layer Engine
-1. **Layer 1 (Native Antigravity Commands)**: Continuously evaluates internal approval handlers with minimal CPU overhead.
-2. **Layer 2 (Pure Node.js CDP Engine - Port 9333)**: Connects to the IDE UI over standard remote debugging to auto-select permission radio options and confirm dialogs smoothly without any third-party npm dependencies.
+<p align="center">
+  <img src="assets/video-preview.gif" alt="Status Bar Hover & Option Switcher Preview" width="650" />
+  <br />
+  <em>Interactive Status Bar: Hover to view real-time model quotas, countdown reset timers, and switch Auto-Accept modes in 1 click!</em>
+</p>
 
 ---
 
-### 2. Real-Time Quota Monitoring
+## What Can This Extension Do?
 
-Never get caught off guard by quota limits mid-task.
+### 1. ⚡ Hands-Free Auto-Accept (Autopilot)
+Tired of constantly clicking "Accept" and "Allow" dozens of times during multi-step agent coding sessions? The built-in Autopilot handles permissions automatically while keeping you in full control.
 
-- **Status Bar Display**: Shows remaining capacity for both Gemini and Claude models with automatic weekly-limit detection.
-- **Smart Health Thresholds**:
-  - 🟢 **Healthy**: `> 35%` remaining
-  - 🟡 **Warning**: `15% - 35%` remaining
-  - 🔴 **Critical**: `< 15%` remaining (status bar automatically alerts)
-- **Countdown to Reset**: Tooltips and the dashboard show the exact countdown until your rolling quota window resets.
+| Auto Active (`Auto: ON`) | Auto Paused (`Auto: OFF`) |
+|:---:|:---:|
+| ![Auto ON](assets/auto-on.png) | ![Auto OFF](assets/auto-off.png) |
+
+- **1-Click Direct Toggle**: Click the status bar item anytime to instantly toggle Autopilot `ON` ↔ `OFF`.
+- **Hover Option Selector**: Hover your mouse over the status bar item to view the active setting and click to switch options directly inside the tooltip without opening dialog menus!
+
+#### 3 Smart Safety Modes:
+- **Option 1: Allow once (`Single prompt`)**: Approves the current step only — ideal for high-security tasks requiring step-by-step verification.
+- **Option 2: In conversation (`Recommended`)**: Auto-approves code edits and terminal commands within the current chat session to keep coding uninterrupted.
+- **Option 3: Always allow (`Permanent`)**: Full hands-free automation for long, autonomous, or overnight development tasks.
 
 ---
 
-### 3. Automated 1,000-Turn Activity Logger & Dashboard
+### 2. 📊 Real-Time AI Quota Tracking (Status Bar)
+Never get caught off guard by sudden model quota limits mid-task.
+
+- **Clean Status Bar Display**: `Gemi:80% | Cl:80% Auto: ON`
+- **Multi-Window Support**: Tracks rolling 5-Hour and Weekly limit windows for Google Gemini (3.7 / 3.1 Pro & Flash) and Anthropic Claude (3.7 Sonnet / 3.5 Sonnet).
+- **Smart Color Health Cues**:
+  - 🟢 **Healthy**: `> 35%` remaining quota
+  - 🟡 **Warning**: `15% – 35%` remaining quota
+  - 🔴 **Critical**: `< 15%` remaining quota (status bar alerts with error styling)
+- **Countdown Timers**: Tooltips show the exact countdown until your rolling quota window resets.
+
+---
+
+### 3. 🎨 Interactive Visual Analytics Dashboard
+A modern, dark-themed dashboard built for real-time monitoring of all your AI models.
+
+![Visual Dashboard](assets/dashboard1.png)
+
+- **Circular Animated SVG Gauges**: High-resolution vector gauges displaying remaining percentages for each model family.
+- **Live Reset Timers**: Real-time countdowns for both weekly and 5-hour rolling windows.
+- **Quick Controls**: Toggle Autopilot ON/OFF, change permission levels, and force refresh quotas directly from the dashboard header.
+
+---
+
+### 4. 🕒 100% Automated Activity Logger (1,000 Turns)
+Keep an accurate record of your AI usage and understand where your quota is being spent.
+
+![Auto-Tracked Activity Log](assets/dashboard-log.png)
 
 - **Prompt Snippet Tagging**: Automatically detects and pairs each quota drop with your actual prompt text.
-- **FIFO 1,000-Log History**: Stores your last 1,000 interactions locally in extension state.
-- **Visual Analytics Dashboard**:
-  - Circular animated SVG gauges for each model family.
-  - Paginated activity log (`10 items per page`).
-  - Daily consumption stats (total percentage consumed today across all requests).
+- **Zero-Manual Effort**: Automatically records every AI prompt/turn without needing to click Start or Stop.
+- **1,000-Turn FIFO History**: Stores your last 1,000 interactions locally in extension storage.
+- **Today's Stats Summary**: Quick glance at total percentage consumed today across all requests.
+- **Pagination**: Smooth 10-items-per-page pagination (`Page 1 of 100`) with instant Clear History support.
 
 ---
 
-## Status Bar Display Modes
+## ⚙️ Requirements & Setup
 
-Customize the status bar layout via `antigravityLimitMonitor.statusBarFormat` or by clicking **Switch Status Bar Display Mode**:
+### 1. Supported Platform
+- **Google Antigravity IDE**: **Version 2.5.5** (tested and verified).
 
-| Mode | Example Preview |
-|---|---|
-| **All Active (Default)** | `Gemi:80% | Cl:80% Auto: ON` |
-| **Gemini Only** | `Gem: 80% (5h) · 65% (W) Auto: ON` |
-| **5-Hour Only** | `Gem: 80% | Cl: 80% Auto: ON` |
-| **Compact** | `80% Auto: ON` |
-| **Smart Lowest** | `Claude (W): 12% Auto: ON` |
+### 2. Autopilot Remote Debugging Port (`--remote-debugging-port=9333`)
+To enable the **Autopilot (Auto-Accept)** engine to automatically select permission options (**Option 1 / Option 2 / Option 3**) and submit confirmation dialogs hands-free, **Antigravity IDE must be launched with the `--remote-debugging-port=9333` flag**.
 
----
+#### How to configure:
 
-## Extension Settings
+- **Method A: Desktop / Taskbar Shortcut (Recommended)**
+  1. Right-click your **Antigravity IDE** shortcut &rarr; select **Properties**.
+  2. In the **Shortcut** tab, find the **Target** field.
+  3. Append ` --remote-debugging-port=9333` at the end of the line (ensure there is a space before `--`), for example:
+     ```text
+     "C:\Users\<YourUsername>\AppData\Local\Programs\Antigravity IDE\Antigravity IDE.exe" --remote-debugging-port=9333
+     ```
+  4. Click **Apply** and **OK**. Always launch Antigravity IDE via this shortcut.
 
-Add these options to your `.vscode/settings.json` or global user settings:
+- **Method B: Terminal / PowerShell**
+  ```powershell
+  & "C:\Users\$env:USERNAME\AppData\Local\Programs\Antigravity IDE\Antigravity IDE.exe" --remote-debugging-port=9333
+  ```
 
-```jsonc
-{
-  // Interval in seconds to poll model quota limits (default: 10)
-  "antigravityLimitMonitor.refreshIntervalSeconds": 10,
-
-  // Status bar display mode: "all" | "geminiOnly" | "fiveHourOnly" | "compact" | "smartLowest"
-  "antigravityLimitMonitor.statusBarFormat": "all",
-
-  // Highlight status bar with warning/error colors when limits are low (default: true)
-  "antigravityLimitMonitor.showStatusAlertColors": true,
-
-  // Remaining quota percentage threshold to trigger low quota notification (default: 20, 0 to disable)
-  "antigravityLimitMonitor.lowQuotaWarningThreshold": 20,
-
-  // Default Auto-Accept permission option: 1 (Once), 2 (Conversation), 3 (Always)
-  "antigravityLimitMonitor.autoAccept.choice": 2,
-
-  // Polling frequency in ms for auto-accepting steps and terminal commands (default: 800)
-  "antigravityLimitMonitor.autoAccept.pollIntervalMs": 800,
-
-  // Connect to Chrome DevTools Protocol port to select permission options (default: true)
-  "antigravityLimitMonitor.autoAccept.enableCdpMode": true,
-
-  // Remote debugging port for CDP connection (default: 9333)
-  "antigravityLimitMonitor.autoAccept.cdpPort": 9333
-}
-```
+> **Note:** The **Real-Time Quota Monitor**, **Activity Tracker**, and **Visual Dashboard** work out of the box via the local Language Server without requiring any flags. The `--remote-debugging-port=9333` flag is specifically required for the hands-free Autopilot modal automation.
 
 ---
 
-## Contributed Commands
+## 📦 Installation
+
+### Method 1: Install from Open VSX Registry (Recommended)
+1. In Antigravity IDE, open the Extensions view (`Ctrl+Shift+X` / `Cmd+Shift+X`).
+2. Search for **`Antigravity AI Quota & Auto-Accept Autopilot`** (or `san-chanadach`).
+3. Click **Install**.
+
+### Method 2: Install from `.vsix` Release
+1. Download the latest `antigravity-quota-autopilot-1.1.2.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
+2. Open Antigravity IDE.
+3. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and choose **Extensions: Install from VSIX...**.
+4. Select the downloaded `.vsix` file and reload the window.
+
+---
+
+## 🛠️ Contributed Commands
 
 | Command | Identifier | Description |
 |---|---|---|
@@ -132,74 +131,9 @@ Add these options to your `.vscode/settings.json` or global user settings:
 
 ---
 
-## Requirements & Setup
-
-### 1. Supported Platform
-- **Antigravity IDE**: **Version 2.5.5** (tested and verified).
-
-### 2. Autopilot Remote Debugging Port (`--remote-debugging-port=9333`)
-To enable the **Autopilot (Auto-Accept)** engine to automatically select permission options (**Option 1 / Option 2 / Option 3**) and submit confirmation dialogs hands-free, **Antigravity IDE must be launched with the `--remote-debugging-port=9333` flag**.
-
-#### How to configure:
-
-- **Method A: Desktop / Taskbar Shortcut (Recommended)**
-  1. Right-click your **Antigravity IDE** shortcut &rarr; select **Properties**.
-  2. In the **Shortcut** tab, find the **Target** field.
-  3. Append ` --remote-debugging-port=9333` at the end of the line (with a space before `--`), for example:
-     ```text
-     "C:\Users\<YourUsername>\AppData\Local\Programs\Antigravity IDE\Antigravity IDE.exe" --remote-debugging-port=9333
-     ```
-  4. Click **Apply** and **OK**. Launch Antigravity IDE via this shortcut.
-
-- **Method B: Terminal / PowerShell**
-  ```powershell
-  & "C:\Users\$env:USERNAME\AppData\Local\Programs\Antigravity IDE\Antigravity IDE.exe" --remote-debugging-port=9333
-  ```
-
-> **Note:** The **Real-Time Quota Monitor**, **Activity Tracker**, and **Visual Dashboard** work out of the box via the local Language Server without requiring any flags. The `--remote-debugging-port=9333` flag is specifically required for the hands-free Autopilot modal automation.
-
----
-
-## Installation
-
-### Method 1: Install from Open VSX Registry (Recommended)
-1. In Antigravity IDE, open the Extensions view (`Ctrl+Shift+X` / `Cmd+Shift+X`).
-2. Search for **`Antigravity Quota Monitor & Autopilot`**.
-3. Click **Install**.
-
-### Method 2: Install from `.vsix` Release
-1. Download `antigravity-quota-autopilot-1.1.0.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
-2. Open Antigravity IDE.
-3. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and choose **Extensions: Install from VSIX...**.
-4. Select the downloaded `.vsix` file and reload the window.
-
----
-
-## Development & Building
-
-```bash
-# Clone the repository
-git clone https://github.com/San-chanadach/antigravity-quota-autopilot.git
-cd antigravity-quota-autopilot
-
-# Install dependencies
-npm install
-
-# Compile TypeScript
-npm run compile
-
-# Build production bundle with esbuild
-npm run build
-
-# Package into .vsix file
-npx @vscode/vsce package --no-dependencies
-```
-
----
-
 ## ☕ Support & Buy Me a Coffee
 
-If you find **Antigravity Quota Monitor & Autopilot** useful and it saves you time, please consider buying me a coffee to support continued development and maintenance!
+If you find **Antigravity AI Quota & Auto-Accept Autopilot** useful and it saves you time, please consider buying me a coffee to support continued development and maintenance!
 
 [![Buy Me a Coffee on Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20on%20Ko--fi-ff5e5b?style=for-the-badge&logo=ko-fi)](https://ko-fi.com/sanchanadach)
 
@@ -216,4 +150,3 @@ Developed and maintained by **San Chanadach** ([@San-chanadach](https://github.c
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
-
