@@ -2,7 +2,7 @@
   "name": "antigravity-quota-autopilot",
   "displayName": "Antigravity AI Quota & Auto-Accept Autopilot",
   "description": "Real-time AI model quota monitor, hands-free auto-accept autopilot, and automated activity logger for Google Antigravity IDE.",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "publisher": "san-chanadach",
   "author": "San Chanadach",
   "license": "MIT",
@@ -111,6 +111,16 @@
         "command": "antigravityLimitMonitor.selectOpt3",
         "title": "Select Auto-Accept Option 3 (Always allow)",
         "category": "Limit Monitor"
+      },
+      {
+        "command": "antigravityLimitMonitor.patchShortcuts",
+        "title": "Auto-Patch Shortcuts (Enable Port 9333 for CDP Autopilot)",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityLimitMonitor.relaunchWithPort",
+        "title": "Enable Port 9333 & Restart Antigravity (1-Click CDP Autopilot)",
+        "category": "Antigravity"
       }
     ],
     "viewsContainers": {
@@ -164,8 +174,8 @@
             "smartLowest"
           ],
           "enumDescriptions": [
-            "Show both Gemini & Claude 5h limits (e.g. ✨ 57% | 🚀 100%)",
-            "Show Gemini limits only (e.g. ✨ 57% (5h) 69% (W))",
+            "Show both Gemini & Claude 5h limits (e.g. Gemi: 57% | Cl: 100%)",
+            "Show Gemini limits only (e.g. Gemi: 57% (5h) 69% (W))",
             "Show only 5-hour limits for active models",
             "Compact icon with lowest percentage",
             "Smart mode: automatically highlights the group with the lowest remaining quota"
@@ -200,7 +210,7 @@
             3
           ],
           "enumDescriptions": [
-            "Option 1: Allow this time (Yes, allow this time)",
+            "Option 1: Standard Auto (Native Engine / Allow this time)",
             "Option 2: Allow in this conversation (Yes, in this conversation)",
             "Option 3: Always allow (Yes, and always allow)"
           ],

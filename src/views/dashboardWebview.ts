@@ -129,6 +129,43 @@ export class DashboardWebviewPanel {
               await this._autoAcceptService.setChoice(message.choice as AutoAcceptChoice);
             }
             break;
+          case 'relaunchWithPort': {
+            const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+            const port = config.get<number>('autoAccept.cdpPort', 9333);
+            const action = await vscode.window.showInformationMessage(
+              `Antigravity IDE will close and restart with Port ${port} in 2 seconds to activate 100% Hands-free CDP Autopilot. Please ensure all your files are saved.`,
+              'Restart Now',
+              'Cancel'
+            );
+            if (action === 'Restart Now') {
+              await this._autoAcceptService.relaunchWithDebugPort(port);
+            }
+            break;
+          }
+          case 'patchShortcuts': {
+            const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+            const port = config.get<number>('autoAccept.cdpPort', 9333);
+            const res = await this._autoAcceptService.patchWindowsShortcuts(port);
+            if (res.newlyPatched > 0) {
+              vscode.window.showInformationMessage(
+                `Successfully patched ${res.newlyPatched} Antigravity shortcut(s) with --remote-debugging-port=${port}. Please close and reopen Antigravity from your Desktop or Start Menu shortcut to activate 100% Hands-free CDP Autopilot.`,
+                'Dismiss'
+              );
+            } else if (res.alreadyPatched > 0) {
+              vscode.window.showInformationMessage(
+                `All ${res.alreadyPatched} Antigravity shortcut(s) on Desktop and Start Menu already have --remote-debugging-port=${port}. Please close Antigravity completely and reopen it from your Desktop or Start Menu shortcut to activate Port ${port}.`,
+                'Dismiss'
+              );
+            } else {
+              vscode.window.showWarningMessage(
+                `Could not find Antigravity shortcuts on Desktop or Start Menu. Please launch Antigravity with: "Antigravity IDE.exe" --remote-debugging-port=${port}`,
+                'Dismiss'
+              );
+            }
+            await this._autoAcceptService.checkCdpPort();
+            this.updateContent();
+            break;
+          }
         }
       },
       null,
@@ -194,7 +231,8 @@ export class DashboardWebviewPanel {
     const todaySummary = this._taskSessionService.getTodaySummary();
     const autoAccept = this._autoAcceptService.getStatus();
     const autoChoice = this._autoAcceptService.getChoice();
-    this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, quota, history, todaySummary, autoAccept, autoChoice);
+    const isCdp = this._autoAcceptService.getIsCdpAvailable();
+    this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, quota, history, todaySummary, autoAccept, autoChoice, isCdp);
   }
 
   private _getHtmlForWebview(
@@ -203,13 +241,15 @@ export class DashboardWebviewPanel {
     history: ActivityLogEntry[],
     todaySummary: any,
     autoAcceptEnabled: boolean = false,
-    autoAcceptChoice: AutoAcceptChoice = 1
+    autoAcceptChoice: AutoAcceptChoice = 1,
+    isCdpAvailable: boolean = false
   ): string {
     const initialDataJson = JSON.stringify(quota || null);
     const initialHistoryJson = JSON.stringify(history || []);
     const initialSummaryJson = JSON.stringify(todaySummary || null);
     const initialAutoAcceptJson = JSON.stringify(autoAcceptEnabled);
     const initialAutoChoiceJson = JSON.stringify(autoAcceptChoice);
+    const initialIsCdpJson = JSON.stringify(isCdpAvailable);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -368,6 +408,109 @@ export class DashboardWebviewPanel {
     .choice-select:hover {
       border-color: #444c56;
       background: var(--bg-card-hover);
+    }
+
+    .btn-patch-shortcuts {
+      background: rgba(210, 153, 34, 0.15);
+      color: #d29922;
+      border: 1px solid rgba(210, 153, 34, 0.4);
+      padding: 7px 11px;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+
+    .btn-patch-shortcuts:hover:not(:disabled) {
+      background: rgba(210, 153, 34, 0.25);
+      border-color: #d29922;
+      transform: translateY(-1px);
+    }
+
+    .cdp-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 6px;
+      background: rgba(63, 185, 80, 0.1);
+      border: 1px solid rgba(63, 185, 80, 0.3);
+      color: #3fb950;
+      white-space: nowrap;
+    }
+
+    .badge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #3fb950;
+      box-shadow: 0 0 6px #3fb950;
+    }
+
+    .cdp-tip-banner {
+      background: rgba(210, 153, 34, 0.08);
+      border: 1px solid rgba(210, 153, 34, 0.25);
+      border-radius: 8px;
+      padding: 10px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--text-main);
+    }
+
+    .cdp-tip-content strong {
+      color: #d29922;
+    }
+
+    .cdp-tip-content code {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #e6edf3;
+    }
+
+    .btn-warning-sm {
+      background: rgba(210, 153, 34, 0.2);
+      color: #d29922;
+      border: 1px solid rgba(210, 153, 34, 0.4);
+      padding: 5px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      transition: var(--transition);
+      white-space: nowrap;
+    }
+
+    .btn-warning-sm.active-btn {
+      background: #238636;
+      border-color: #2ea043;
+      color: #ffffff;
+    }
+
+    .btn-warning-sm.active-btn:hover:not(:disabled) {
+      background: #2ea043;
+      border-color: #3fb950;
+      transform: translateY(-1px);
+    }
+
+    .btn-warning-sm:hover:not(:disabled) {
+      background: rgba(210, 153, 34, 0.35);
+      border-color: #d29922;
+      transform: translateY(-1px);
     }
 
     .choice-select:focus {
@@ -684,10 +827,20 @@ export class DashboardWebviewPanel {
             <span class="mini-toggle" id="autoAcceptMiniToggle"></span>
           </button>
           <select class="choice-select" id="autoAcceptChoiceSelect" onchange="changeAutoAcceptChoice(this.value)" title="Auto-Accept Permission Preference">
-            <option value="1">Option 1: Allow once</option>
-            <option value="2">Option 2: In conversation</option>
-            <option value="3">Option 3: Always allow</option>
+            <option value="1">${isCdpAvailable ? 'Option 1: Allow once' : 'Option 1: Standard Auto (Native)'}</option>
+            <option value="2" ${isCdpAvailable ? '' : 'disabled'}>Option 2: In conversation ${isCdpAvailable ? '' : '(Requires Port 9333)'}</option>
+            <option value="3" ${isCdpAvailable ? '' : 'disabled'}>Option 3: Always allow ${isCdpAvailable ? '' : '(Requires Port 9333)'}</option>
           </select>
+          ${!isCdpAvailable ? `
+          <button class="btn-patch-shortcuts" id="relaunchBtn" onclick="relaunchWithPort()" title="1-Click: Patch shortcuts and automatically restart Antigravity with Port 9333">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 4px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Enable Port 9333 & Restart
+          </button>
+          ` : `
+          <span class="cdp-status-badge" title="CDP 100% Hands-Free Autopilot is Connected on Port 9333">
+            <span class="badge-dot"></span> CDP: Connected
+          </span>
+          `}
         </div>
         <button class="btn btn-secondary" onclick="openSettings()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -706,6 +859,24 @@ export class DashboardWebviewPanel {
         </button>
       </div>
     </div>
+
+    ${!isCdpAvailable ? `
+    <div class="cdp-tip-banner" id="cdpTipBanner">
+      <div class="cdp-tip-content">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d29922" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <strong>Standard Auto Active:</strong> For true 100% hands-free Auto-Run (auto-clicking prompts in Chat), launch Antigravity with <code>--remote-debugging-port=9333</code>.
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="btn-warning-sm" onclick="patchShortcuts()" title="Patch Windows shortcuts to always start with port 9333">
+          Patch Shortcuts Only
+        </button>
+        <button class="btn-warning-sm active-btn" onclick="relaunchWithPort()" title="Patch shortcuts and restart Antigravity with Port 9333 right now">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Restart with Port 9333
+        </button>
+      </div>
+    </div>
+    ` : ''}
 
     <div id="errorBanner" class="error-banner">
       <span id="errorMessage">Unable to connect to Antigravity Language Server.</span>
@@ -1006,6 +1177,20 @@ export class DashboardWebviewPanel {
 
     let currentAutoAccept = ${initialAutoAcceptJson};
     let currentAutoChoice = ${initialAutoChoiceJson};
+    let currentIsCdp = ${initialIsCdpJson};
+
+    function relaunchWithPort() {
+      vscode.postMessage({ command: 'relaunchWithPort' });
+    }
+
+    function patchShortcuts() {
+      const btns = document.querySelectorAll('.btn-patch-shortcuts, #patchShortcutsBtn, .btn-warning-sm');
+      btns.forEach(b => {
+        b.disabled = true;
+        b.innerText = 'Patching...';
+      });
+      vscode.postMessage({ command: 'patchShortcuts' });
+    }
 
     function toggleAutoAccept() {
       vscode.postMessage({ command: 'toggleAutoAccept' });
@@ -1013,6 +1198,12 @@ export class DashboardWebviewPanel {
 
     function changeAutoAcceptChoice(val) {
       const choice = parseInt(val, 10);
+      if (!currentIsCdp && (choice === 2 || choice === 3)) {
+        const sel = document.getElementById('autoAcceptChoiceSelect');
+        if (sel) sel.value = '1';
+        vscode.postMessage({ command: 'setAutoAcceptChoice', choice: 1 });
+        return;
+      }
       if (choice === 1 || choice === 2 || choice === 3) {
         currentAutoChoice = choice;
         vscode.postMessage({ command: 'setAutoAcceptChoice', choice });

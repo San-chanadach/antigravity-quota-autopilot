@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import * as http from 'http';
 import * as crypto from 'crypto';
 import * as cp from 'child_process';
+import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
 import { EventEmitter } from 'events';
 import { AutoAcceptChoice } from './types';
 
@@ -104,31 +107,78 @@ const DOM_OBSERVER_SCRIPT = `
     try { clearInterval(window.__AGY_AUTO_ACCEPT_INTERVAL); } catch(e) {}
   }
 
-  var SIDEBAR_SELECTORS = '[role="tree"], [role="treeitem"], .conversation-list, .chat-history, .past-chat, [class*="history-list"], [class*="convo-list"]';
+  // 1. Strict blacklist: Never touch code editors, file trees, settings, file mention chips, or chat history
+  var IGNORED_SELECTORS = [
+    '.monaco-editor',
+    '.editor-instance',
+    '.editor-group-container',
+    '.part.editor',
+    '.settings-editor',
+    '.preferences-editor',
+    '[class*="settings-"]',
+    '[class*="preferences-"]',
+    '[role="tree"]',
+    '[role="treeitem"]',
+    '.conversation-list',
+    '.chat-history',
+    '.past-chat',
+    '[class*="history-list"]',
+    '[class*="convo-list"]',
+    '.context-scope-mention',
+    '[class*="context-scope"]',
+    '[class*="context-mention"]',
+    '[class*="mention"]',
+    '[class*="composer"]',
+    '[role="combobox"]',
+    '.monaco-list-row'
+  ].join(', ');
 
-  function isSidebarElement(el) {
+  function isIgnoredElement(el) {
     if (!el || !el.closest) return false;
-    if (el.closest(SIDEBAR_SELECTORS)) return true;
+    if (el.closest(IGNORED_SELECTORS)) return true;
+    // Prevent clicking anything inside input or contenteditable containers
+    if (el.closest('[contenteditable="true"], textarea, input, .monaco-inputbox')) return true;
+    // Prevent clicking file reference buttons (e.g. chips with file paths in title)
+    var title = (el.getAttribute('title') || '').toLowerCase();
+    if (title && (title.includes('\\') || title.includes('/') || /\.(ts|js|json|md|py|go|rs|cpp|c|h|html|css)$/.test(title))) {
+      return true;
+    }
+    return false;
+  }
+
+  // 2. Focus Safety Guard: If user is actively focused on chat input, code editor, or any input, NEVER steal focus!
+  function isUserTyping() {
+    var active = document.activeElement;
+    if (!active) return false;
+    var tag = (active.tagName || '').toLowerCase();
+    if (tag === 'textarea' || tag === 'input' || active.isContentEditable) {
+      return true;
+    }
+    if (active.closest && active.closest('[contenteditable="true"], [role="combobox"], .monaco-inputbox, .interactive-input, .chat-input, .composer')) {
+      return true;
+    }
     return false;
   }
 
   function getChoiceKeywords() {
     var choice = window.__AGY_AUTO_ACCEPT_CHOICE || 1;
     if (choice === 2) {
-      return ['in this conversation', 'this conversation', 'allow in this conversation', '2.'];
+      return ['in this conversation', 'allow in this conversation'];
     } else if (choice === 3) {
-      return ['always allow', 'yes, and always allow', '3.'];
+      return ['always allow', 'yes, and always allow'];
     }
-    return ['allow this time', 'yes, allow this time', 'allow once', '1.'];
+    return ['allow this time', 'yes, allow this time', 'allow once'];
   }
 
   function selectTargetOption() {
     var targetKeywords = getChoiceKeywords();
-    var options = document.querySelectorAll('[role="radio"], [role="option"], input[type="radio"], .quick-input-list-row, label, .monaco-list-row');
+    var options = document.querySelectorAll('[role="radio"], [role="option"], input[type="radio"], label');
     for (var i = 0; i < options.length; i++) {
       var opt = options[i];
-      if (isSidebarElement(opt)) continue;
-      var optText = (opt.innerText || opt.textContent || '').trim().toLowerCase().replace(/\\s+/g, ' ');
+      if (isIgnoredElement(opt)) continue;
+      if (opt.closest('.monaco-list, [role="tree"], .editor-container, .tabs-container')) continue;
+
+      var optText = (opt.innerText || opt.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ');
       if (!optText) continue;
 
       for (var k = 0; k < targetKeywords.length; k++) {
@@ -143,58 +193,67 @@ const DOM_OBSERVER_SCRIPT = `
     return false;
   }
 
-  function getTargetActionTexts() {
-    var choice = window.__AGY_AUTO_ACCEPT_CHOICE || 1;
-    var choiceTexts = [];
+  function isTargetButton(text, choice) {
+    var exactTargets = [
+      'submit',
+      'submit ↵',
+      'allow',
+      'allow this time',
+      'yes, allow this time',
+      'allow once',
+      'proceed',
+      'continue',
+      'retry',
+      'run',
+      'run command',
+      'accept'
+    ];
+
     if (choice === 2) {
-      choiceTexts = ['yes, in this conversation', 'in this conversation', 'allow in this conversation'];
+      exactTargets.push('in this conversation', 'yes, in this conversation', 'allow in this conversation');
     } else if (choice === 3) {
-      choiceTexts = ['yes, and always allow', 'always allow'];
-    } else {
-      choiceTexts = ['yes, allow this time', 'allow this time', 'allow once'];
+      exactTargets.push('always allow', 'yes, and always allow');
     }
 
-    return choiceTexts.concat([
-      'submit',
-      'run',
-      'accept',
-      'allow',
-      'retry',
-      'continue'
-    ]);
+    for (var i = 0; i < exactTargets.length; i++) {
+      var target = exactTargets[i];
+      if (text === target) return true;
+      // Allow trailing symbol like 'submit ↵' or 'submit ->' (max 4 extra chars after space)
+      if (text.startsWith(target + ' ') && (text.length <= target.length + 4)) return true;
+    }
+    return false;
   }
 
   function scanAndClick() {
     if (!window.__AGY_AUTO_ACCEPT_ENABLED) return;
 
+    // Safety: If the user is currently typing in chat or input box, do not interrupt!
+    if (isUserTyping()) return;
+
     // 1. Auto-select user's preferred option in radio/checkbox/list prompts
     selectTargetOption();
 
-    // 2. Scan and click buttons
-    var targetTexts = getTargetActionTexts();
+    // 2. Scan and click confirmation buttons in chat prompts
+    var choice = window.__AGY_AUTO_ACCEPT_CHOICE || 1;
     var buttons = document.querySelectorAll('button, div[role="button"], a[role="button"], input[type="button"], input[type="submit"]');
     for (var i = 0; i < buttons.length; i++) {
       var btn = buttons[i];
-      if (isSidebarElement(btn)) continue;
+      if (isIgnoredElement(btn)) continue;
 
-      var text = (btn.innerText || btn.textContent || btn.value || '').trim().toLowerCase().replace(/\\s+/g, ' ');
+      var text = (btn.innerText || btn.textContent || btn.value || '').trim().toLowerCase().replace(/\s+/g, ' ');
       if (!text) continue;
 
-      for (var t = 0; t < targetTexts.length; t++) {
-        var target = targetTexts[t];
-        if (text === target || text.indexOf(target) === 0 || (text.length <= 35 && text.indexOf(target) !== -1)) {
-          if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') continue;
-          if (target === 'run' && text.indexOf('always run') !== -1) continue;
+      if (isTargetButton(text, choice)) {
+        if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') continue;
 
-          var now = Date.now();
-          if (btn.__lastAgyClick && now - btn.__lastAgyClick < 2500) continue;
-          btn.__lastAgyClick = now;
+        var now = Date.now();
+        if (btn.__lastAgyClick && now - btn.__lastAgyClick < 2500) continue;
+        btn.__lastAgyClick = now;
 
-          try {
-            btn.click();
-            return;
-          } catch (e) {}
-        }
+        try {
+          btn.click();
+          return;
+        } catch (e) {}
       }
     }
   }
@@ -207,11 +266,18 @@ const DOM_OBSERVER_SCRIPT = `
 })();
 `;
 
+export interface ShortcutPatchResult {
+  newlyPatched: number;
+  alreadyPatched: number;
+  totalFound: number;
+}
+
 export class AutoAcceptService extends EventEmitter implements vscode.Disposable {
   private static instance: AutoAcceptService;
   private globalState?: vscode.Memento;
   private isEnabled: boolean = false;
   private choice: AutoAcceptChoice = 1;
+  private isCdpAvailable: boolean = false;
   private pollTimer: NodeJS.Timeout | null = null;
   private cdpCheckTimer: NodeJS.Timeout | null = null;
   private cdpSockets: Map<string, PureCdpSocket> = new Map();
@@ -225,9 +291,17 @@ export class AutoAcceptService extends EventEmitter implements vscode.Disposable
     const defaultChoice = config.get<AutoAcceptChoice>('autoAccept.choice', 1);
     this.choice = this.globalState?.get<AutoAcceptChoice>('antigravity_auto_accept_choice', defaultChoice) ?? defaultChoice;
 
-    if (this.isEnabled) {
-      this.startEngines();
-    }
+    // Asynchronously check CDP port status on init
+    this.checkCdpPort().then((available) => {
+      if (!available && this.choice !== 1) {
+        this.choice = 1;
+        this.globalState?.update('antigravity_auto_accept_choice', 1);
+        this.emit('choiceChanged', 1);
+      }
+      if (this.isEnabled) {
+        this.startEngines();
+      }
+    });
   }
 
   public static getInstance(globalState?: vscode.Memento): AutoAcceptService {
@@ -247,17 +321,66 @@ export class AutoAcceptService extends EventEmitter implements vscode.Disposable
     return this.choice;
   }
 
+  public getIsCdpAvailable(): boolean {
+    return this.isCdpAvailable;
+  }
+
+  public async checkCdpPort(): Promise<boolean> {
+    const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+    const port = config.get<number>('autoAccept.cdpPort', 9333);
+    this.isCdpAvailable = await this.pingPort(port);
+    return this.isCdpAvailable;
+  }
+
   public getChoiceLabel(choice?: AutoAcceptChoice): string {
     const c = choice ?? this.choice;
     switch (c) {
-      case 1: return 'Allow this time (Once)';
-      case 2: return 'In this conversation (Recommended)';
-      case 3: return 'Always allow (Permanent)';
-      default: return 'Allow this time';
+      case 1:
+        return this.isCdpAvailable ? 'Allow this time (Once)' : 'Standard Auto (Native Engine)';
+      case 2:
+        return 'In this conversation (Recommended)';
+      case 3:
+        return 'Always allow (Permanent)';
+      default:
+        return 'Standard Auto';
     }
   }
 
-  public async setChoice(choice: AutoAcceptChoice, autoEnable: boolean = true): Promise<void> {
+  public async setChoice(choice: AutoAcceptChoice, autoEnable: boolean = true): Promise<boolean> {
+    await this.checkCdpPort();
+
+    if (!this.isCdpAvailable && (choice === 2 || choice === 3)) {
+      const targetLabel = choice === 2 ? 'Option 2 (In conversation)' : 'Option 3 (Always allow)';
+      vscode.window.showWarningMessage(
+        `${targetLabel} requires Antigravity IDE to be launched with --remote-debugging-port=9333. Switched to Option 1 (Standard Auto) instead.`,
+        'Auto-Patch Shortcuts (Windows)',
+        'Dismiss'
+      ).then(async (action) => {
+        if (action === 'Auto-Patch Shortcuts (Windows)') {
+          const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+          const port = config.get<number>('autoAccept.cdpPort', 9333);
+          const res = await this.patchWindowsShortcuts(port);
+          if (res.newlyPatched > 0) {
+            vscode.window.showInformationMessage(
+              `Successfully patched ${res.newlyPatched} Antigravity shortcut(s) with port ${port}. Please close and reopen Antigravity from your Desktop shortcut to activate CDP Autopilot.`
+            );
+          } else if (res.alreadyPatched > 0) {
+            vscode.window.showInformationMessage(
+              `All ${res.alreadyPatched} Antigravity shortcut(s) already have port ${port}. Please close Antigravity completely and reopen it from your Desktop shortcut to activate Port ${port}.`
+            );
+          }
+        }
+      });
+
+      this.choice = 1;
+      await this.globalState?.update('antigravity_auto_accept_choice', 1);
+      this.emit('choiceChanged', 1);
+      if (autoEnable && !this.isEnabled) {
+        await this.setEnabled(true, false);
+      }
+      return false;
+    }
+
     this.choice = choice;
     await this.globalState?.update('antigravity_auto_accept_choice', choice);
     this.broadcastCdpChoice(choice);
@@ -265,6 +388,7 @@ export class AutoAcceptService extends EventEmitter implements vscode.Disposable
     if (autoEnable && !this.isEnabled) {
       await this.setEnabled(true, false);
     }
+    return true;
   }
 
   private broadcastCdpChoice(choice: AutoAcceptChoice): void {
@@ -289,8 +413,9 @@ export class AutoAcceptService extends EventEmitter implements vscode.Disposable
   public async toggle(): Promise<boolean> {
     const nextState = !this.isEnabled;
     await this.setEnabled(nextState, false);
+    const modeLabel = this.isCdpAvailable ? `Option ${this.choice}` : 'Standard';
     vscode.window.setStatusBarMessage(
-      nextState ? `$(zap) Auto-Accept: ON (Option ${this.choice})` : `$(circle-slash) Auto-Accept: OFF`,
+      nextState ? `$(zap) Auto-Accept: ON (${modeLabel})` : `$(circle-slash) Auto-Accept: OFF`,
       2500
     );
     return this.isEnabled;
@@ -328,14 +453,22 @@ export class AutoAcceptService extends EventEmitter implements vscode.Disposable
     });
   }
 
-  public async patchWindowsShortcuts(targetPort: number = 9333): Promise<number> {
-    if (process.platform !== 'win32') return 0;
+  public async patchWindowsShortcuts(targetPort: number = 9333): Promise<ShortcutPatchResult> {
+    const emptyResult: ShortcutPatchResult = { newlyPatched: 0, alreadyPatched: 0, totalFound: 0 };
+    if (process.platform !== 'win32') return emptyResult;
     return new Promise((resolve) => {
       const psScript = `
 $WshShell = New-Object -ComObject WScript.Shell
-$dirs = @("$env:USERPROFILE\\\\Desktop", "$env:PUBLIC\\\\Desktop", "$env:APPDATA\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs", "$env:ALLUSERSPROFILE\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs", "$env:APPDATA\\\\Microsoft\\\\Internet Explorer\\\\Quick Launch\\\\User Pinned\\\\TaskBar")
+$dirs = @(
+  "$env:USERPROFILE\\Desktop",
+  "$env:PUBLIC\\Desktop",
+  "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs",
+  "$env:ALLUSERSPROFILE\\Microsoft\\Windows\\Start Menu\\Programs",
+  "$env:APPDATA\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar"
+)
 $flag = "--remote-debugging-port=${targetPort}"
-$count = 0
+$newly = 0
+$already = 0
 foreach ($dir in $dirs) {
   if (Test-Path $dir) {
     $files = Get-ChildItem -Path $dir -Filter "*.lnk" -Recurse -ErrorAction SilentlyContinue
@@ -343,23 +476,85 @@ foreach ($dir in $dirs) {
       try {
         $s = $WshShell.CreateShortcut($file.FullName)
         if ($file.Name -like "*Antigravity*" -or $s.TargetPath -like "*Antigravity*") {
-          if ($s.Arguments -notlike "*$flag*") {
+          if ($s.Arguments -like "*$flag*") {
+            $already++
+          } else {
             $s.Arguments = ("$($s.Arguments) " + $flag).Trim()
             $s.Save()
-            $count++
+            $newly++
           }
         }
       } catch {}
     }
   }
 }
-Write-Output $count
+Write-Output "$newly,$already"
 `;
-      cp.exec(`powershell -NoProfile -NonInteractive -Command "${psScript.replace(/\r?\n/g, ' ')}"`, (err, stdout) => {
-        const count = parseInt(stdout?.trim() || '0', 10);
-        resolve(isNaN(count) ? 0 : count);
+      const b64 = Buffer.from(psScript, 'utf16le').toString('base64');
+      cp.exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${b64}`, (err, stdout) => {
+        const parts = (stdout?.trim() || '0,0').split(',');
+        const newly = parseInt(parts[0] || '0', 10) || 0;
+        const already = parseInt(parts[1] || '0', 10) || 0;
+        resolve({
+          newlyPatched: newly,
+          alreadyPatched: already,
+          totalFound: newly + already
+        });
       });
     });
+  }
+
+
+  public async findAntigravityExe(): Promise<string> {
+    if (process.execPath && !process.execPath.toLowerCase().endsWith('node.exe') && fs.existsSync(process.execPath)) {
+      return process.execPath;
+    }
+    const candidates = [
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Antigravity IDE', 'Antigravity IDE.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Antigravity', 'Antigravity.exe'),
+      path.join(process.env.PROGRAMFILES || '', 'Antigravity IDE', 'Antigravity IDE.exe'),
+      path.join(process.env['PROGRAMFILES(X86)'] || '', 'Antigravity IDE', 'Antigravity IDE.exe')
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        return c;
+      }
+    }
+    return 'Antigravity IDE.exe';
+  }
+
+  public async relaunchWithDebugPort(targetPort: number = 9333): Promise<void> {
+    if (process.platform !== 'win32') return;
+
+    // 1. Patch shortcuts so all future launches keep port 9333
+    await this.patchWindowsShortcuts(targetPort);
+
+    // 2. Locate the executable
+    const exePath = await this.findAntigravityExe();
+
+    // 3. Resolve active workspace
+    let workspaceArg = '';
+    if (vscode.workspace.workspaceFile) {
+      workspaceArg = vscode.workspace.workspaceFile.fsPath;
+    } else if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+      workspaceArg = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    }
+
+    // 4. Create an independent launcher .bat in temp directory
+    const batPath = path.join(os.tmpdir(), `antigravity_relaunch_${Date.now()}.bat`);
+    const targetArgs = workspaceArg ? `--remote-debugging-port=${targetPort} "${workspaceArg}"` : `--remote-debugging-port=${targetPort}`;
+    const batContent = `@echo off\r\ntimeout /t 2 /nobreak >nul\r\nstart "" "${exePath}" ${targetArgs}\r\ndel "%~f0"\r\n`;
+    fs.writeFileSync(batPath, batContent, 'utf8');
+
+    // 5. Spawn via WMI to break out of VS Code's Windows Job Object (which kills child processes on quit)
+    const psCmd = `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = 'cmd.exe /c "${batPath}"' }`;
+    const b64 = Buffer.from(psCmd, 'utf16le').toString('base64');
+    try {
+      cp.execSync(`powershell.exe -NoProfile -NonInteractive -EncodedCommand ${b64}`, { windowsHide: true });
+    } catch (e) {}
+
+    // 6. Gracefully exit current IDE window
+    await vscode.commands.executeCommand('workbench.action.quit');
   }
 
   public async verifyPortAndNotify(): Promise<void> {
@@ -388,7 +583,7 @@ Write-Output $count
     }
   }
 
-  private startEngines(): void {
+  private async startEngines(): Promise<void> {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -398,26 +593,30 @@ Write-Output $count
       this.cdpCheckTimer = null;
     }
 
-    // 1. Layer 1: Native VS Code Commands Polling (Default 800ms)
     const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
-    const intervalMs = config.get<number>('autoAccept.pollIntervalMs', 800);
-
-    this.pollTimer = setInterval(() => {
-      this.runNativeCommands();
-    }, Math.max(400, intervalMs));
-
-    // Immediate first run
-    this.runNativeCommands();
-
-    // 2. Layer 2: Optional CDP Observer Auto-Detection (every 5s)
     const enableCdp = config.get<boolean>('autoAccept.enableCdpMode', true);
+
     if (enableCdp) {
+      await this.checkCdpPort();
+    }
+
+    // If CDP port 9333 is open, CDP observer handles auto-accept directly without polling native commands
+    if (this.isCdpAvailable) {
       this.broadcastCdpState(true);
       this.checkAndInjectCdp();
       this.cdpCheckTimer = setInterval(() => {
         this.checkAndInjectCdp();
       }, 5000);
+      return;
     }
+
+    // Layer 1 Fallback (Port 9333 closed): Poll native VS Code Commands
+    const intervalMs = config.get<number>('autoAccept.pollIntervalMs', 800);
+    this.pollTimer = setInterval(() => {
+      this.runNativeCommands();
+    }, Math.max(400, intervalMs));
+
+    this.runNativeCommands();
   }
 
   private stopEngines(): void {
@@ -441,10 +640,15 @@ Write-Output $count
     if (!this.isEnabled || this.isExecuting) return;
     this.isExecuting = true;
 
+    // If CDP is available and active, CDP handles chat clicks without needing native command spam
+    if (this.isCdpAvailable) {
+      this.isExecuting = false;
+      return;
+    }
+
+    // Only run safe, non-focus-stealing commands (never run hunk navigation commands that yank editor focus)
     const commandsToRun = [
       'antigravity.agent.acceptAgentStep',
-      'antigravity.prioritized.agentAcceptAllInFile',
-      'antigravity.prioritized.agentAcceptFocusedHunk',
       'antigravity.terminalCommand.run',
       'antigravity.terminalCommand.accept',
       'antigravity.command.accept'

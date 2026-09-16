@@ -60,7 +60,8 @@ export class StatusBarManager implements vscode.Disposable {
     const showAlertColors = config.get<boolean>('showStatusAlertColors', true);
 
     const isAuto = this.autoAcceptService.getStatus();
-    const autoStatus = isAuto ? 'Auto:ON' : 'Auto:OFF';
+    const isCdp = this.autoAcceptService.getIsCdpAvailable();
+    const autoStatus = isAuto ? (isCdp ? 'Auto:ON' : 'Auto:ON(Std)') : 'Auto:OFF';
 
     let gPct = '--%';
     let cPct = '--%';
@@ -159,26 +160,40 @@ export class StatusBarManager implements vscode.Disposable {
     const choice = this.autoAcceptService.getChoice();
     const choiceLabel = this.autoAcceptService.getChoiceLabel();
 
+    const isCdp = this.autoAcceptService.getIsCdpAvailable();
+    const modeBadge = isCdp ? 'CDP Mode' : 'Standard Mode';
+
     // === SECTION 1: AUTO-ACCEPT OPTION SELECTION (MOUSE HOVER) ===
-    md.appendMarkdown(`### $(zap) Auto-Accept: **${isAuto ? '$(check) ON' : '$(circle-slash) OFF'}** *(Click status bar to toggle)*\n\n`);
+    md.appendMarkdown(`### $(zap) Auto-Accept: **${isAuto ? '$(check) ON' : '$(circle-slash) OFF'}** *(${modeBadge} · Click status bar to toggle)*\n\n`);
     md.appendMarkdown(`Current setting: **Option ${choice} — ${choiceLabel}**\n\n`);
     md.appendMarkdown(`**$(arrow-small-right) Select Option:**\n\n`);
 
-    const opt1Active = choice === 1
-      ? `**[$(check) Option 1: Allow once (Single prompt)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt1)**`
-      : `[$(circle-outline) Option 1: Allow once (Single prompt)](command:antigravityLimitMonitor.selectOpt1)`;
+    if (isCdp) {
+      const opt1Active = choice === 1
+        ? `**[$(check) Option 1: Allow once (Single prompt)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt1)**`
+        : `[$(circle-outline) Option 1: Allow once (Single prompt)](command:antigravityLimitMonitor.selectOpt1)`;
 
-    const opt2Active = choice === 2
-      ? `**[$(comment-discussion) Option 2: In conversation (Recommended)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt2)**`
-      : `[$(circle-outline) Option 2: In conversation (Recommended)](command:antigravityLimitMonitor.selectOpt2)`;
+      const opt2Active = choice === 2
+        ? `**[$(comment-discussion) Option 2: In conversation (Recommended)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt2)**`
+        : `[$(circle-outline) Option 2: In conversation (Recommended)](command:antigravityLimitMonitor.selectOpt2)`;
 
-    const opt3Active = choice === 3
-      ? `**[$(shield) Option 3: Always allow (Permanent)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt3)**`
-      : `[$(circle-outline) Option 3: Always allow (Permanent)](command:antigravityLimitMonitor.selectOpt3)`;
+      const opt3Active = choice === 3
+        ? `**[$(shield) Option 3: Always allow (Permanent)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt3)**`
+        : `[$(circle-outline) Option 3: Always allow (Permanent)](command:antigravityLimitMonitor.selectOpt3)`;
 
-    md.appendMarkdown(`- ${opt1Active}\n`);
-    md.appendMarkdown(`- ${opt2Active}\n`);
-    md.appendMarkdown(`- ${opt3Active}\n\n`);
+      md.appendMarkdown(`- ${opt1Active}\n`);
+      md.appendMarkdown(`- ${opt2Active}\n`);
+      md.appendMarkdown(`- ${opt3Active}\n\n`);
+    } else {
+      const opt1Active = `**[$(check) Option 1: Standard Auto (Native Engine)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt1)**`;
+      const opt2Locked = `$(lock) Option 2: In conversation *(Requires Debug Port 9333)*`;
+      const opt3Locked = `$(lock) Option 3: Always allow *(Requires Debug Port 9333)*`;
+
+      md.appendMarkdown(`- ${opt1Active}\n`);
+      md.appendMarkdown(`- ${opt2Locked}\n`);
+      md.appendMarkdown(`- ${opt3Locked}\n\n`);
+      md.appendMarkdown(`*Tip: Standard Auto executes terminal commands and file edits directly via IDE native engine without needing Port 9333.*\n\n`);
+    }
     md.appendMarkdown(`---\n\n`);
 
     // === SECTION 2: TODAY'S ACTIVITY SUMMARY ===
@@ -244,7 +259,7 @@ export class StatusBarManager implements vscode.Disposable {
     return md;
   }
 
-  private getProgressIndicator(fraction: number): string {
+    private getProgressIndicator(fraction: number): string {
     if (fraction >= 0.75) return '🟢';
     if (fraction >= 0.35) return '🟡';
     return '🔴';

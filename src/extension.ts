@@ -82,33 +82,75 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('antigravityLimitMonitor.setAutoAcceptChoice', async () => {
+      const isCdpAvailable = await autoAcceptService.checkCdpPort();
       const currentChoice = autoAcceptService.getChoice();
+
       const items = [
         {
-          label: '$(check) Option 1: Allow this time (Once)',
+          label: isCdpAvailable
+            ? '$(check) Option 1: Allow this time (Once)'
+            : '$(check) Option 1: Standard Auto (Native Engine)',
           description: currentChoice === 1 ? '[Active]' : '',
-          detail: 'Auto-approves individual terminal commands and file edits one at a time',
+          detail: isCdpAvailable
+            ? 'Auto-approves individual terminal commands and file edits one at a time'
+            : 'Auto-executes terminal commands and file edits via IDE native engine (No Port 9333 required)',
           choice: 1 as AutoAcceptChoice,
+          disabled: false,
         },
         {
-          label: '$(comment-discussion) Option 2: Allow in this conversation (Recommended)',
-          description: currentChoice === 2 ? '[Active]' : '',
-          detail: 'Auto-approves operations throughout the active chat conversation',
+          label: isCdpAvailable
+            ? '$(comment-discussion) Option 2: Allow in this conversation (Recommended)'
+            : '$(lock) Option 2: In conversation [Requires Debug Port 9333]',
+          description: currentChoice === 2 ? '[Active]' : (isCdpAvailable ? '' : '[Locked]'),
+          detail: isCdpAvailable
+            ? 'Auto-approves operations throughout the active chat conversation'
+            : 'Requires Antigravity IDE launched with --remote-debugging-port=9333 to auto-select dialog options',
           choice: 2 as AutoAcceptChoice,
+          disabled: !isCdpAvailable,
         },
         {
-          label: '$(shield) Option 3: Always allow (Permanent)',
-          description: currentChoice === 3 ? '[Active]' : '',
-          detail: 'Permanent approval without asking again',
+          label: isCdpAvailable
+            ? '$(shield) Option 3: Always allow (Permanent)'
+            : '$(lock) Option 3: Always allow [Requires Debug Port 9333]',
+          description: currentChoice === 3 ? '[Active]' : (isCdpAvailable ? '' : '[Locked]'),
+          detail: isCdpAvailable
+            ? 'Permanent approval without asking again'
+            : 'Requires Antigravity IDE launched with --remote-debugging-port=9333 for DOM-level auto-selection',
           choice: 3 as AutoAcceptChoice,
+          disabled: !isCdpAvailable,
         },
       ];
 
+      const modeTitle = isCdpAvailable ? 'CDP Mode' : 'Standard Mode';
       const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: `Select Auto-Accept Option (Current: Option ${currentChoice})`,
+        placeHolder: `Select Auto-Accept Option (Current: Option ${currentChoice} · ${modeTitle})`,
       });
 
       if (selected) {
+        if (selected.disabled) {
+          vscode.window.showWarningMessage(
+            `Option ${selected.choice} requires Antigravity IDE to be launched with --remote-debugging-port=9333. You can continue using Standard Auto without any port.`,
+            'Auto-Patch Shortcuts (Windows)',
+            'Dismiss'
+          ).then(async (action) => {
+            if (action === 'Auto-Patch Shortcuts (Windows)') {
+              const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+              const port = config.get<number>('autoAccept.cdpPort', 9333);
+              const res = await autoAcceptService.patchWindowsShortcuts(port);
+              if (res.newlyPatched > 0) {
+                vscode.window.showInformationMessage(
+                  `Antigravity shortcuts patched with port ${port}. Please close and reopen Antigravity from your Desktop shortcut to activate CDP Autopilot.`
+                );
+              } else if (res.alreadyPatched > 0) {
+                vscode.window.showInformationMessage(
+                  `All ${res.alreadyPatched} Antigravity shortcuts already have port ${port}. Please close Antigravity completely and reopen it from your Desktop shortcut to activate Port ${port}.`
+                );
+              }
+            }
+          });
+          return;
+        }
+
         await autoAcceptService.setChoice(selected.choice, true);
         vscode.window.setStatusBarMessage(
           `$(zap) Auto-Accept set to Option ${selected.choice} (${autoAcceptService.getChoiceLabel(selected.choice)})`,
@@ -122,13 +164,61 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('antigravityLimitMonitor.selectOpt1', async () => {
       await autoAcceptService.setChoice(1, true);
-      vscode.window.setStatusBarMessage('$(zap) Auto-Accept set to Option 1: Allow once', 3000);
+      const isCdp = autoAcceptService.getIsCdpAvailable();
+      const label = isCdp ? 'Option 1: Allow once' : 'Option 1: Standard Auto';
+      vscode.window.setStatusBarMessage(`$(zap) Auto-Accept set to ${label}`, 3000);
     }),
     vscode.commands.registerCommand('antigravityLimitMonitor.selectOpt2', async () => {
+      const isCdp = await autoAcceptService.checkCdpPort();
+      if (!isCdp) {
+        vscode.window.showWarningMessage(
+          'Option 2 (In conversation) requires Antigravity IDE to be launched with --remote-debugging-port=9333.',
+          'Dismiss'
+        );
+        return;
+      }
       await autoAcceptService.setChoice(2, true);
       vscode.window.setStatusBarMessage('$(zap) Auto-Accept set to Option 2: In conversation (Recommended)', 3000);
     }),
+    vscode.commands.registerCommand('antigravityLimitMonitor.relaunchWithPort', async () => {
+      const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+      const port = config.get<number>('autoAccept.cdpPort', 9333);
+      const action = await vscode.window.showInformationMessage(
+        `Antigravity IDE will close and restart with Port ${port} in 2 seconds to activate 100% Hands-free CDP Autopilot. Please ensure all your files are saved.`,
+        'Restart Now',
+        'Cancel'
+      );
+      if (action === 'Restart Now') {
+        await autoAcceptService.relaunchWithDebugPort(port);
+      }
+    }),
+    vscode.commands.registerCommand('antigravityLimitMonitor.patchShortcuts', async () => {
+      const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+      const port = config.get<number>('autoAccept.cdpPort', 9333);
+      const res = await autoAcceptService.patchWindowsShortcuts(port);
+      if (res.newlyPatched > 0) {
+        vscode.window.showInformationMessage(
+          `Successfully patched ${res.newlyPatched} Antigravity shortcut(s) with --remote-debugging-port=${port}. Please close and reopen Antigravity from your Desktop shortcut to activate CDP Autopilot.`
+        );
+      } else if (res.alreadyPatched > 0) {
+        vscode.window.showInformationMessage(
+          `All ${res.alreadyPatched} Antigravity shortcut(s) on Desktop and Start Menu already have --remote-debugging-port=${port}. Please close Antigravity completely and reopen it from your Desktop shortcut to activate Port ${port}.`
+        );
+      } else {
+        vscode.window.showWarningMessage(
+          `Could not find Antigravity shortcuts on Desktop or Start Menu. Please launch Antigravity with: "Antigravity IDE.exe" --remote-debugging-port=${port}`
+        );
+      }
+    }),
     vscode.commands.registerCommand('antigravityLimitMonitor.selectOpt3', async () => {
+      const isCdp = await autoAcceptService.checkCdpPort();
+      if (!isCdp) {
+        vscode.window.showWarningMessage(
+          'Option 3 (Always allow) requires Antigravity IDE to be launched with --remote-debugging-port=9333.',
+          'Dismiss'
+        );
+        return;
+      }
       await autoAcceptService.setChoice(3, true);
       vscode.window.setStatusBarMessage('$(zap) Auto-Accept set to Option 3: Always allow (Permanent)', 3000);
     })
@@ -139,35 +229,43 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('antigravityLimitMonitor.openAutoAcceptMenu', async () => {
       const isAuto = autoAcceptService.getStatus();
       const currentChoice = autoAcceptService.getChoice();
+      const isCdp = await autoAcceptService.checkCdpPort();
 
-      const items: (vscode.QuickPickItem & { action: string; choice?: AutoAcceptChoice })[] = [
+      const items: (vscode.QuickPickItem & { action: string; choice?: AutoAcceptChoice; disabled?: boolean })[] = [
         {
           label: isAuto ? '$(circle-slash) Turn OFF Auto-Accept' : '$(zap) Turn ON Auto-Accept',
           description: isAuto ? 'Click to Pause' : 'Click to Enable',
           action: 'toggle',
         },
         {
-          label: '$(check) Option 1: Allow this time (Once)',
+          label: isCdp ? '$(check) Option 1: Allow this time (Once)' : '$(check) Option 1: Standard Auto (Native Engine)',
           description: currentChoice === 1 ? '[Active]' : '',
           action: 'setChoice',
           choice: 1,
         },
         {
-          label: '$(comment-discussion) Option 2: Allow in this conversation (Recommended)',
-          description: currentChoice === 2 ? '[Active]' : '',
+          label: isCdp
+            ? '$(comment-discussion) Option 2: Allow in this conversation (Recommended)'
+            : '$(lock) Option 2: In conversation [Requires Debug Port 9333]',
+          description: currentChoice === 2 ? '[Active]' : (isCdp ? '' : '[Locked]'),
           action: 'setChoice',
           choice: 2,
+          disabled: !isCdp,
         },
         {
-          label: '$(shield) Option 3: Always allow (Permanent)',
-          description: currentChoice === 3 ? '[Active]' : '',
+          label: isCdp
+            ? '$(shield) Option 3: Always allow (Permanent)'
+            : '$(lock) Option 3: Always allow [Requires Debug Port 9333]',
+          description: currentChoice === 3 ? '[Active]' : (isCdp ? '' : '[Locked]'),
           action: 'setChoice',
           choice: 3,
+          disabled: !isCdp,
         },
       ];
 
+      const modeTitle = isCdp ? `Opt ${currentChoice} · CDP` : 'Standard';
       const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: `Auto-Accept is ${isAuto ? 'ON (Opt ' + currentChoice + ')' : 'OFF'} — Select action`,
+        placeHolder: `Auto-Accept is ${isAuto ? 'ON (' + modeTitle + ')' : 'OFF'} — Select action`,
       });
 
       if (!selected) return;
@@ -175,6 +273,13 @@ export function activate(context: vscode.ExtensionContext) {
       if (selected.action === 'toggle') {
         await autoAcceptService.toggle();
       } else if (selected.action === 'setChoice' && selected.choice) {
+        if (selected.disabled) {
+          vscode.window.showWarningMessage(
+            `Option ${selected.choice} requires Antigravity IDE to be launched with --remote-debugging-port=9333.`,
+            'Dismiss'
+          );
+          return;
+        }
         await autoAcceptService.setChoice(selected.choice, true);
         vscode.window.setStatusBarMessage(
           `$(zap) Auto-Accept set to Option ${selected.choice} (${autoAcceptService.getChoiceLabel(selected.choice)})`,
