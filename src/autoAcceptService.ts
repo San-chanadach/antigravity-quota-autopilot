@@ -648,6 +648,7 @@ Write-Output "$newly,$already"
 
     // Only run safe, non-focus-stealing commands (never run hunk navigation commands that yank editor focus)
     const commandsToRun = [
+      'antigravity.dynamic.acceptAgentStep',
       'antigravity.agent.acceptAgentStep',
       'antigravity.terminalCommand.run',
       'antigravity.terminalCommand.accept',

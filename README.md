@@ -1,12 +1,12 @@
 # Antigravity AI Quota & Auto-Accept Autopilot
 
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.1.3-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.1.4-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
 [![Author: San Chanadach](https://img.shields.io/badge/Author-San%20Chanadach-blue.svg)](https://github.com/San-chanadach)
 [![Ko-fi: Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-ff5e5b?style=flat&logo=ko-fi)](https://ko-fi.com/sanchanadach)
-[![Antigravity IDE: v2.5.5](https://img.shields.io/badge/Antigravity%20IDE-v2.5.5-purple.svg)]()
+[![Antigravity IDE: v2.6.0+](https://img.shields.io/badge/Antigravity%20IDE-v2.6.0%2B-purple.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An all-in-one companion extension designed exclusively for **Google Antigravity IDE (Version: 2.5.5)** — featuring hands-free **Dual-Mode Auto-Accept** for agent actions, real-time **AI Quota Tracking** (Gemini & Claude), an interactive **Visual Dashboard**, and an automated **1,000-Turn Activity History Logger**.
+An all-in-one companion extension designed exclusively for **Google Antigravity IDE (v2.6.0+ & v2.5.x)** — featuring hands-free **Dual-Mode Auto-Accept** for agent actions, real-time **AI Quota Tracking** (Gemini & Claude), an interactive **Visual Dashboard**, and an automated **1,000-Turn Activity History Logger**.
 
 ---
 
@@ -15,6 +15,17 @@ An all-in-one companion extension designed exclusively for **Google Antigravity 
   <br />
   <em>Interactive Status Bar: Hover to view real-time model quotas, countdown reset timers, and switch Auto-Accept modes in 1 click!</em>
 </p>
+
+---
+
+## What's New in v1.1.4
+
+- **Full Support for Antigravity IDE v2.6.0+ Architecture**:
+  - Automatically detects and connects to the new unified `agy` / `agy.exe` background daemon (`--hub --hub-port=<port>`).
+  - Added HTTP/HTTPS protocol auto-negotiation to seamlessly communicate with newer local daemon instances.
+  - Added multi-window workspace-matching priority so multiple active Antigravity IDE instances connect to their respective project daemons without cross-talk.
+  - Added transcript filesystem watcher support for `~/.gemini/antigravity/brain` alongside legacy paths.
+  - Added support for `antigravity.dynamic.acceptAgentStep` command in the native Auto-Accept engine.
 
 ---
 

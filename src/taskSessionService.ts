@@ -11,7 +11,7 @@ export class TaskSessionService extends EventEmitter {
   private globalState: vscode.Memento;
   private quotaService: QuotaService;
   private previousSnapshots: { [bucketId: string]: number } | null = null;
-  private transcriptWatcher: fs.FSWatcher | null = null;
+  private transcriptWatchers: fs.FSWatcher[] = [];
   private debounceTimer: NodeJS.Timeout | null = null;
   private readonly HISTORY_KEY = 'antigravity_activity_history_v2';
   private readonly SNAPSHOT_KEY = 'antigravity_baseline_snapshots_v2';
@@ -53,16 +53,27 @@ export class TaskSessionService extends EventEmitter {
     return TaskSessionService.instance;
   }
 
+  private getCandidateBrainDirs(): string[] {
+    const dirs = [
+      path.join(os.homedir(), '.gemini', 'antigravity', 'brain'),
+      path.join(os.homedir(), '.gemini', 'antigravity-ide', 'brain'),
+    ];
+    return dirs.filter((d) => fs.existsSync(d));
+  }
+
   private setupTranscriptWatcher(): void {
     try {
-      const brainDir = path.join(os.homedir(), '.gemini', 'antigravity-ide', 'brain');
-      if (!fs.existsSync(brainDir)) return;
-
-      this.transcriptWatcher = fs.watch(brainDir, { recursive: true }, (_eventType, filename) => {
-        if (filename && (filename.includes('transcript') || filename.includes('logs'))) {
-          this.triggerInstantQuotaCheck();
-        }
-      });
+      const brainDirs = this.getCandidateBrainDirs();
+      for (const brainDir of brainDirs) {
+        try {
+          const watcher = fs.watch(brainDir, { recursive: true }, (_eventType, filename) => {
+            if (filename && (filename.includes('transcript') || filename.includes('logs'))) {
+              this.triggerInstantQuotaCheck();
+            }
+          });
+          this.transcriptWatchers.push(watcher);
+        } catch {}
+      }
     } catch {}
   }
 
@@ -95,26 +106,30 @@ export class TaskSessionService extends EventEmitter {
 
   private getLatestPromptTitle(): string | undefined {
     try {
-      const brainDir = path.join(os.homedir(), '.gemini', 'antigravity-ide', 'brain');
-      if (!fs.existsSync(brainDir)) return undefined;
+      const brainDirs = this.getCandidateBrainDirs();
+      if (brainDirs.length === 0) return undefined;
 
-      const brains = fs
-        .readdirSync(brainDir)
-        .filter((b) => b.length > 20 && !b.startsWith('.'));
-      if (brains.length === 0) return undefined;
+      const candidates: { p: string; mtime: number }[] = [];
 
-      // Find transcripts sorted by mtime descending
-      const sorted = brains
-        .map((b) => {
-          const p = path.join(brainDir, b, '.system_generated', 'logs', 'transcript.jsonl');
-          return fs.existsSync(p) ? { p, mtime: fs.statSync(p).mtimeMs } : null;
-        })
-        .filter((x): x is { p: string; mtime: number } => x !== null)
-        .sort((a, b) => b.mtime - a.mtime);
+      for (const brainDir of brainDirs) {
+        try {
+          const brains = fs
+            .readdirSync(brainDir)
+            .filter((b) => b.length > 20 && !b.startsWith('.'));
+          
+          for (const b of brains) {
+            const p = path.join(brainDir, b, '.system_generated', 'logs', 'transcript.jsonl');
+            if (fs.existsSync(p)) {
+              candidates.push({ p, mtime: fs.statSync(p).mtimeMs });
+            }
+          }
+        } catch {}
+      }
 
-      if (sorted.length === 0) return undefined;
+      candidates.sort((a, b) => b.mtime - a.mtime);
+      if (candidates.length === 0) return undefined;
 
-      const content = fs.readFileSync(sorted[0].p, 'utf8');
+      const content = fs.readFileSync(candidates[0].p, 'utf8');
       const lines = content.trim().split('\n');
 
       for (let i = lines.length - 1; i >= 0; i--) {
@@ -241,10 +256,12 @@ export class TaskSessionService extends EventEmitter {
   }
 
   public dispose(): void {
-    if (this.transcriptWatcher) {
-      this.transcriptWatcher.close();
-      this.transcriptWatcher = null;
+    for (const watcher of this.transcriptWatchers) {
+      try {
+        watcher.close();
+      } catch {}
     }
+    this.transcriptWatchers = [];
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
