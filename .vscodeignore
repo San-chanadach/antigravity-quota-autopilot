@@ -7,3 +7,5 @@ inspect_patterns.ps1
 tsconfig.json
 **/*.map
 *.vsix
+**/*.mp4
+assets/Recording*.gif

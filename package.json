@@ -1,8 +1,8 @@
 {
   "name": "antigravity-quota-autopilot",
   "displayName": "Antigravity AI Quota & Auto-Accept Autopilot",
-  "description": "Real-time AI model quota monitor, hands-free auto-accept autopilot, and automated activity logger for Google Antigravity IDE.",
-  "version": "1.1.4",
+  "description": "Real-time AI model quota monitor (Free/Pro/Ultra/Gemini 4 Argon), native Turbo Autopilot & Agent Behavior controller, and activity logger for Google Antigravity IDE v2.6.0+.",
+  "version": "1.2.0",
   "publisher": "san-chanadach",
   "author": "San Chanadach",
   "license": "MIT",
@@ -29,15 +29,16 @@
   "keywords": [
     "antigravity",
     "gemini",
+    "argon",
     "claude",
     "gpt",
     "quota",
     "limit",
     "monitor",
     "autopilot",
-    "auto-accept",
-    "status bar",
-    "tracker"
+    "turbo",
+    "permissions",
+    "status bar"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
@@ -46,81 +47,63 @@
   "contributes": {
     "commands": [
       {
-        "command": "antigravityLimitMonitor.refresh",
-        "title": "Refresh Model Limits",
-        "category": "Limit Monitor",
-        "icon": "$(refresh)"
+        "command": "antigravityLimitMonitor.openQuickMenu",
+        "title": "Open Autopilot & Quota Quick Menu",
+        "category": "Antigravity Autopilot"
       },
       {
-        "command": "antigravityLimitMonitor.openQuickMenu",
-        "title": "Open Limit Monitor Quick Menu",
-        "category": "Limit Monitor"
+        "command": "antigravityLimitMonitor.toggleTurbo",
+        "title": "Toggle Turbo Autopilot (ON/OFF)",
+        "category": "Antigravity Autopilot",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "antigravityLimitMonitor.setPermissionPreset",
+        "title": "Set Global Permissions (Turbo / Default / Request Review)",
+        "category": "Antigravity Autopilot",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "antigravityLimitMonitor.setPlanReviewPolicy",
+        "title": "Set Plan Review Policy (Always Proceed / Always Ask)",
+        "category": "Antigravity Autopilot",
+        "icon": "$(checklist)"
       },
       {
         "command": "antigravityLimitMonitor.showDashboard",
-        "title": "Show Limit Monitor Dashboard",
-        "category": "Limit Monitor",
-        "icon": "$(dashboard)"
+        "title": "Show Quota & Autopilot Dashboard",
+        "category": "Antigravity Autopilot",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "antigravityLimitMonitor.refresh",
+        "title": "Refresh Model Quota Limits",
+        "category": "Antigravity Autopilot",
+        "icon": "$(refresh)"
       },
       {
         "command": "antigravityLimitMonitor.toggleDisplayMode",
         "title": "Switch Status Bar Display Mode",
-        "category": "Limit Monitor"
+        "category": "Antigravity Autopilot"
       },
       {
         "command": "antigravityLimitMonitor.showLogs",
         "title": "Show Limit Monitor Logs",
-        "category": "Limit Monitor",
+        "category": "Antigravity Autopilot",
         "icon": "$(output)"
       },
       {
         "command": "antigravityLimitMonitor.clearHistory",
         "title": "Clear Activity History Logs",
-        "category": "Limit Monitor",
+        "category": "Antigravity Autopilot",
         "icon": "$(trash)"
-      },
+      }
+    ],
+    "keybindings": [
       {
-        "command": "antigravityLimitMonitor.toggleAutoAccept",
-        "title": "Toggle Auto-Accept (ON/OFF)",
-        "category": "Limit Monitor",
-        "icon": "$(zap)"
-      },
-      {
-        "command": "antigravityLimitMonitor.setAutoAcceptChoice",
-        "title": "Set Auto-Accept Option (1: Once / 2: Conversation / 3: Always)",
-        "category": "Limit Monitor",
-        "icon": "$(settings-gear)"
-      },
-      {
-        "command": "antigravityLimitMonitor.openAutoAcceptMenu",
-        "title": "Auto-Accept Status & Options Menu",
-        "category": "Limit Monitor",
-        "icon": "$(zap)"
-      },
-      {
-        "command": "antigravityLimitMonitor.selectOpt1",
-        "title": "Select Auto-Accept Option 1 (Once)",
-        "category": "Limit Monitor"
-      },
-      {
-        "command": "antigravityLimitMonitor.selectOpt2",
-        "title": "Select Auto-Accept Option 2 (In conversation)",
-        "category": "Limit Monitor"
-      },
-      {
-        "command": "antigravityLimitMonitor.selectOpt3",
-        "title": "Select Auto-Accept Option 3 (Always allow)",
-        "category": "Limit Monitor"
-      },
-      {
-        "command": "antigravityLimitMonitor.patchShortcuts",
-        "title": "Auto-Patch Shortcuts (Enable Port 9333 for CDP Autopilot)",
-        "category": "Antigravity"
-      },
-      {
-        "command": "antigravityLimitMonitor.relaunchWithPort",
-        "title": "Enable Port 9333 & Restart Antigravity (1-Click CDP Autopilot)",
-        "category": "Antigravity"
+        "command": "antigravityLimitMonitor.openQuickMenu",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a"
       }
     ],
     "viewsContainers": {
@@ -155,30 +138,30 @@
       ]
     },
     "configuration": {
-      "title": "Antigravity Model Limit Monitor",
+      "title": "Antigravity Quota & Autopilot",
       "properties": {
         "antigravityLimitMonitor.refreshIntervalSeconds": {
           "type": "integer",
           "default": 10,
           "minimum": 3,
           "maximum": 600,
-          "description": "Interval in seconds to refresh model quota limits from Language Server."
+          "description": "Interval in seconds to refresh model quota limits from Antigravity Language Server."
         },
         "antigravityLimitMonitor.statusBarFormat": {
           "type": "string",
           "enum": [
             "all",
-            "geminiOnly",
             "fiveHourOnly",
+            "geminiOnly",
             "compact",
             "smartLowest"
           ],
           "enumDescriptions": [
-            "Show both Gemini & Claude 5h limits (e.g. Gemi: 57% | Cl: 100%)",
-            "Show Gemini limits only (e.g. Gemi: 57% (5h) 69% (W))",
-            "Show only 5-hour limits for active models",
-            "Compact icon with lowest percentage",
-            "Smart mode: automatically highlights the group with the lowest remaining quota"
+            "Show all active model groups dynamically (e.g. Gemi: 95% | Cl: 100% | Ar: 32%)",
+            "Prefer 5-hour limits when available, and weekly limits for weekly-only models (e.g. Gemini 4 Argon)",
+            "Show Gemini & Argon model groups only",
+            "Compact mode with lowest remaining percentage (e.g. Quota: 32% (Ar))",
+            "Smart mode: highlights only the model group with the lowest remaining quota"
           ],
           "default": "all",
           "description": "Display format for the status bar item."
@@ -186,46 +169,14 @@
         "antigravityLimitMonitor.showStatusAlertColors": {
           "type": "boolean",
           "default": true,
-          "description": "Highlight status bar text with warning/error colors when quota falls low."
+          "description": "Highlight status bar text with warning/error colors when quota drops low."
         },
         "antigravityLimitMonitor.lowQuotaWarningThreshold": {
           "type": "number",
           "default": 20,
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 50,
           "description": "Show warning notification when any model limit drops below this percentage (0 to disable)."
-        },
-        "antigravityLimitMonitor.autoAccept.pollIntervalMs": {
-          "type": "integer",
-          "default": 800,
-          "minimum": 300,
-          "maximum": 5000,
-          "description": "Polling frequency in milliseconds for auto-accepting steps and terminal commands."
-        },
-        "antigravityLimitMonitor.autoAccept.choice": {
-          "type": "integer",
-          "enum": [
-            1,
-            2,
-            3
-          ],
-          "enumDescriptions": [
-            "Option 1: Standard Auto (Native Engine / Allow this time)",
-            "Option 2: Allow in this conversation (Yes, in this conversation)",
-            "Option 3: Always allow (Yes, and always allow)"
-          ],
-          "default": 1,
-          "description": "Default permission option preference when auto-accepting prompts."
-        },
-        "antigravityLimitMonitor.autoAccept.enableCdpMode": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically detect and attach to CDP port 9333 for permission and retry prompts."
-        },
-        "antigravityLimitMonitor.autoAccept.cdpPort": {
-          "type": "integer",
-          "default": 9333,
-          "description": "Remote debugging port for CDP connection."
         }
       }
     }

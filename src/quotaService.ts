@@ -6,7 +6,9 @@ import { promisify } from 'util';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
 import {
+  AccountTier,
   LanguageServerConnection,
+  ModelGroupType,
   ParsedQuotaInfo,
   QuotaBucket,
   QuotaGroup,
@@ -76,6 +78,148 @@ export class QuotaService extends EventEmitter {
       clearInterval(this.pollingTimer);
       this.pollingTimer = null;
     }
+  }
+
+  /**
+   * Sends a native JetboxWriteState RPC update to Antigravity IDE v2.6.0+ daemon (agy).
+   * Broadcasts to secondary open IDE windows in the background to keep multi-window state in sync.
+   */
+  public async sendJetboxWriteState(userSettingsPatch: Record<string, any>): Promise<boolean> {
+    // 1. Fast path via cached daemon connection
+    if (this.cachedConnection) {
+      const ok = await this.postJetboxWriteStateToEndpoint(
+        this.cachedConnection.port,
+        this.cachedConnection.csrfToken,
+        userSettingsPatch,
+        2000,
+        !!this.cachedConnection.useHttp
+      );
+      if (ok) {
+        this.log(`JetboxWriteState succeeded on cached port ${this.cachedConnection.port} (PID ${this.cachedConnection.pid}).`);
+        const primaryPid = this.cachedConnection.pid;
+        this.broadcastJetboxWriteState(userSettingsPatch, primaryPid).catch(() => {});
+        return true;
+      }
+      this.log(`JetboxWriteState failed on cached port ${this.cachedConnection.port}. Re-discovering...`);
+      this.cachedConnection = null;
+    }
+
+    // 2. Discover daemon connection and send
+    try {
+      const conn = await this.discoverAndConnect();
+      if (conn) {
+        this.cachedConnection = conn;
+        const ok = await this.postJetboxWriteStateToEndpoint(
+          conn.port,
+          conn.csrfToken,
+          userSettingsPatch,
+          2500,
+          !!conn.useHttp
+        );
+        if (ok) {
+          this.log(`JetboxWriteState succeeded on discovered port ${conn.port} (PID ${conn.pid}).`);
+          this.broadcastJetboxWriteState(userSettingsPatch, conn.pid).catch(() => {});
+          return true;
+        }
+      }
+    } catch (err: any) {
+      this.log(`JetboxWriteState discovery error: ${err.message || err}`);
+    }
+
+    return false;
+  }
+
+  private async broadcastJetboxWriteState(
+    userSettingsPatch: Record<string, any>,
+    excludePid: string
+  ): Promise<void> {
+    try {
+      const candidates = await this.findCandidateProcesses();
+      for (const c of candidates) {
+        if (c.pid === excludePid || c.ports.length === 0) continue;
+        const port = c.ports[0];
+        await this.postJetboxWriteStateToEndpoint(
+          port,
+          c.csrfToken,
+          userSettingsPatch,
+          1200,
+          c.useHttp
+        );
+      }
+    } catch {}
+  }
+
+  private postJetboxWriteStateToEndpoint(
+    port: number,
+    csrfToken: string,
+    userSettingsPatch: Record<string, any>,
+    timeoutMs: number = 2000,
+    useHttp: boolean = true
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      let isSettled = false;
+      const timer = setTimeout(() => {
+        if (!isSettled) {
+          isSettled = true;
+          try {
+            req.destroy();
+          } catch {}
+          resolve(false);
+        }
+      }, timeoutMs);
+
+      const payload = JSON.stringify({
+        userConfig: {
+          userSettings: userSettingsPatch,
+        },
+      });
+
+      const client = useHttp ? http : https;
+      const req = client.request(
+        {
+          hostname: '127.0.0.1',
+          port,
+          path: '/exa.language_server_pb.LanguageServerService/JetboxWriteState',
+          method: 'POST',
+          rejectUnauthorized: false,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload),
+            'x-codeium-csrf-token': csrfToken,
+            'Connect-Protocol-Version': '1',
+          },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            clearTimeout(timer);
+            if (isSettled) return;
+            isSettled = true;
+            if (res.statusCode === 200) {
+              // Ensure it's JSON (not SPA HTML fallback)
+              const trimmed = data.trim();
+              if (trimmed.startsWith('{') || trimmed === '') {
+                resolve(true);
+                return;
+              }
+            }
+            resolve(false);
+          });
+        }
+      );
+
+      req.on('error', () => {
+        clearTimeout(timer);
+        if (!isSettled) {
+          isSettled = true;
+          resolve(false);
+        }
+      });
+
+      req.write(payload);
+      req.end();
+    });
   }
 
   public async refresh(forceFresh: boolean = false): Promise<ParsedQuotaInfo | null> {
@@ -175,7 +319,7 @@ export class QuotaService extends EventEmitter {
     // Try candidates in priority order
     for (const candidate of candidates) {
       this.log(`Testing candidate PID ${candidate.pid} (isIde: ${candidate.isIde}, wsMatch: ${candidate.isWorkspaceMatch}, useHttp: ${candidate.useHttp}) with ports: ${candidate.ports.join(', ')}`);
-      
+
       if (candidate.ports.length === 0) continue;
 
       // Test candidate ports in parallel with fast timeout
@@ -266,8 +410,8 @@ export class QuotaService extends EventEmitter {
 
               // Get actual listening ports via lsof/netstat
               const activePorts = await this.getListeningPortsForPid(pid);
-              
-              // Merge actual ports and guessed ports (keeping actual ports and hub port first)
+
+              // Merge actual ports and guessed ports (keeping guessed hub port first)
               const ports = Array.from(new Set([...guessedPorts, ...activePorts]));
 
               this.log(`Discovered candidate PID ${pid} (Active: ${activePorts.join(',')} | Guessed: ${guessedPorts.join(',')} | isAgy: ${isAgy})`);
@@ -320,7 +464,7 @@ export class QuotaService extends EventEmitter {
               const csrfToken = csrfMatch[1];
               const isAgy = item.CommandLine.includes('agy') || item.CommandLine.includes('--hub');
               const isIde = item.CommandLine.includes('antigravity') || isAgy;
-              
+
               const cmdLower = item.CommandLine.toLowerCase();
               const isWorkspaceMatch = currentWorkspaces.some((w) => cmdLower.includes(w));
 
@@ -397,7 +541,7 @@ export class QuotaService extends EventEmitter {
         '/bin/lsof',
         'lsof'
       ];
-      
+
       for (const lsofPath of lsofPaths) {
         try {
           const { stdout: lsofOut } = await execAsync(`${lsofPath} -nP -a -p ${pid} -iTCP -sTCP:LISTEN`, {
@@ -608,13 +752,15 @@ export class QuotaService extends EventEmitter {
     data: QuotaSummaryResponse,
     userInfo?: { name?: string; email?: string; planName?: string } | null
   ): ParsedQuotaInfo {
-    const groups: QuotaGroup[] = data.response?.groups || [];
+    const rawGroups: QuotaGroup[] = data.response?.groups || [];
+    // Keep only groups that actually possess at least one bucket (prevents --% on Free/custom plans)
+    const groups = rawGroups.filter((g) => Array.isArray(g.buckets) && g.buckets.length > 0);
+
     let lowest = 1.0;
+    let lowestGroupName: string | undefined;
 
     for (const group of groups) {
-      const weeklyBucket = group.buckets?.find(
-        (b) => b.window === 'weekly' || b.bucketId.includes('weekly')
-      );
+      const weeklyBucket = QuotaService.findBucket(group, 'weekly');
       const isWeeklyExhausted =
         weeklyBucket &&
         typeof weeklyBucket.remainingFraction === 'number' &&
@@ -630,24 +776,193 @@ export class QuotaService extends EventEmitter {
         }
 
         if (typeof bucket.remainingFraction === 'number') {
-          // If bucket is disabled or weekly limit is 0, effective fraction is 0
           const effective = bucket.disabled ? 0 : bucket.remainingFraction;
           if (effective < lowest) {
             lowest = effective;
+            lowestGroupName = group.displayName;
           }
         }
       }
     }
+
+    const accountTier = QuotaService.detectAccountTier(userInfo?.planName, groups);
 
     return {
       groups,
       description: data.response?.description,
       lastUpdated: new Date(),
       lowestFraction: lowest,
+      lowestGroupName,
       userEmail: userInfo?.email,
       userName: userInfo?.name,
       planName: userInfo?.planName,
+      accountTier,
     };
+  }
+
+  /**
+   * Classifies a model group across Free, Pro, Ultra, and Enterprise accounts.
+   * Checks 'argon' before 'gemini' since "Gemini 4 Argon" contains "gemini".
+   */
+  public static identifyGroupType(group: QuotaGroup): ModelGroupType {
+    const nameLower = (group.displayName || '').toLowerCase();
+    const hasArgonBucket = (group.buckets || []).some((b) =>
+      (b.bucketId || '').toLowerCase().includes('argon')
+    );
+
+    if (nameLower.includes('argon') || hasArgonBucket) {
+      return 'argon';
+    }
+    if (nameLower.includes('gemini')) {
+      return 'gemini';
+    }
+    if (
+      nameLower.includes('claude') ||
+      nameLower.includes('gpt') ||
+      nameLower.includes('3p') ||
+      (group.buckets || []).some((b) => (b.bucketId || '').toLowerCase().includes('3p'))
+    ) {
+      return 'claude_gpt';
+    }
+    return 'other';
+  }
+
+  /**
+   * Returns a concise status-bar label for any model group.
+   */
+  public static getShortGroupLabel(group: QuotaGroup): string {
+    const type = QuotaService.identifyGroupType(group);
+    switch (type) {
+      case 'argon':
+        return 'Ar';
+      case 'gemini':
+        return 'Gemi';
+      case 'claude_gpt':
+        return 'Cl';
+      default: {
+        const cleaned = (group.displayName || 'Model').replace(/[^a-zA-Z0-9\s]/g, '').trim();
+        const firstWord = cleaned.split(/\s+/)[0] || 'Mod';
+        return firstWord.length > 4 ? firstWord.slice(0, 4) : firstWord;
+      }
+    }
+  }
+
+  /**
+   * Locates the 5-hour or weekly bucket within a group without misclassifying weekly-only groups.
+   */
+  public static findBucket(
+    group: QuotaGroup | undefined,
+    window: '5h' | 'weekly'
+  ): QuotaBucket | undefined {
+    if (!group || !group.buckets || group.buckets.length === 0) return undefined;
+
+    const match =
+      group.buckets.find((b) => b.window === window) ||
+      group.buckets.find((b) => (b.bucketId || '').toLowerCase().includes(window)) ||
+      group.buckets.find((b) => {
+        const dn = (b.displayName || '').toLowerCase();
+        return window === '5h'
+          ? dn.includes('5-hour') || dn.includes('five hour') || dn.includes('5 hour')
+          : dn.includes('weekly');
+      });
+
+    if (match) return match;
+
+    // Fallback for single-bucket groups that don't explicitly state '5h'
+    if (window === 'weekly' && group.buckets.length === 1) {
+      return group.buckets[0];
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Computes the effective remaining fraction and text for a model group.
+   * - 'effective': uses the bottleneck (lowest) remaining fraction across all buckets in the group.
+   * - 'fiveHourPreferred': uses the 5h bucket when available, or falls back to weekly for weekly-only groups (e.g. Gemini 4 Argon).
+   */
+  public static getGroupEffectiveQuota(
+    group: QuotaGroup,
+    mode: 'effective' | 'fiveHourPreferred' = 'effective'
+  ): {
+    fraction: number;
+    pct: string;
+    fiveHourBucket?: QuotaBucket;
+    weeklyBucket?: QuotaBucket;
+    isWeeklyOnly: boolean;
+  } {
+    const fiveHourBucket = QuotaService.findBucket(group, '5h');
+    const weeklyBucket = QuotaService.findBucket(group, 'weekly');
+    const isWeeklyOnly = !fiveHourBucket && !!weeklyBucket;
+
+    const weeklyExhausted =
+      weeklyBucket &&
+      typeof weeklyBucket.remainingFraction === 'number' &&
+      weeklyBucket.remainingFraction <= 0;
+
+    if (weeklyExhausted) {
+      return {
+        fraction: 0,
+        pct: '0%',
+        fiveHourBucket,
+        weeklyBucket,
+        isWeeklyOnly,
+      };
+    }
+
+    if (mode === 'fiveHourPreferred' && fiveHourBucket) {
+      const frac = fiveHourBucket.disabled ? 0 : fiveHourBucket.remainingFraction;
+      return {
+        fraction: frac,
+        pct: QuotaService.formatPercentage(frac),
+        fiveHourBucket,
+        weeklyBucket,
+        isWeeklyOnly,
+      };
+    }
+
+    let minFrac = 1.0;
+    let found = false;
+    for (const b of group.buckets || []) {
+      if (typeof b.remainingFraction === 'number') {
+        const eff = b.disabled ? 0 : b.remainingFraction;
+        if (!found || eff < minFrac) {
+          minFrac = eff;
+          found = true;
+        }
+      }
+    }
+
+    const finalFrac = found ? minFrac : 1.0;
+    return {
+      fraction: finalFrac,
+      pct: QuotaService.formatPercentage(finalFrac),
+      fiveHourBucket,
+      weeklyBucket,
+      isWeeklyOnly,
+    };
+  }
+
+  public static detectAccountTier(planName?: string, groups: QuotaGroup[] = []): AccountTier {
+    if (planName) {
+      const lower = planName.toLowerCase();
+      if (lower.includes('ultra')) return 'ultra';
+      if (lower.includes('enterprise') || lower.includes('business') || lower.includes('team')) {
+        return 'enterprise';
+      }
+      if (lower.includes('pro')) return 'pro';
+      if (lower.includes('free')) return 'free';
+    }
+
+    if (groups.length > 0) {
+      const hasProModels = groups.some((g) => {
+        const t = QuotaService.identifyGroupType(g);
+        return t === 'argon' || t === 'claude_gpt';
+      });
+      return hasProModels ? 'pro' : 'free';
+    }
+
+    return 'unknown';
   }
 
   /**
@@ -669,7 +984,7 @@ export class QuotaService extends EventEmitter {
     const parts: string[] = [];
     if (days > 0) parts.push(`${days}d`);
     if (hours > 0 || days > 0) parts.push(`${hours}h`);
-    parts.push(`${minutes}m`);
+    if (days === 0) parts.push(`${minutes}m`);
 
     return parts.join(' ');
   }

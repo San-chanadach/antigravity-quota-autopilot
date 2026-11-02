@@ -1,25 +1,31 @@
 import * as vscode from 'vscode';
 import { QuotaService } from './quotaService';
 import { TaskSessionService } from './taskSessionService';
-import { AutoAcceptService } from './autoAcceptService';
+import { AutopilotService } from './autopilotService';
 import { StatusBarManager } from './views/statusBar';
 import { QuotaTreeDataProvider } from './views/sidebarProvider';
 import { DashboardWebviewPanel } from './views/dashboardWebview';
-import { ParsedQuotaInfo, AutoAcceptChoice } from './types';
+import { ParsedQuotaInfo, PermissionPreset, PlanReviewPolicy } from './types';
 
 let quotaService: QuotaService;
 let taskSessionService: TaskSessionService;
-let autoAcceptService: AutoAcceptService;
+let autopilotService: AutopilotService;
 let statusBarManager: StatusBarManager;
 let treeDataProvider: QuotaTreeDataProvider;
 let hasAlertedForLowQuota = false;
 
+interface ActionQuickPickItem extends vscode.QuickPickItem {
+  action?: string;
+  preset?: PermissionPreset;
+  policy?: PlanReviewPolicy;
+}
+
 export function activate(context: vscode.ExtensionContext) {
   quotaService = QuotaService.getInstance();
   taskSessionService = TaskSessionService.getInstance(context.globalState, quotaService);
-  autoAcceptService = AutoAcceptService.getInstance(context.globalState);
-  statusBarManager = new StatusBarManager(quotaService, taskSessionService, autoAcceptService);
-  treeDataProvider = new QuotaTreeDataProvider(quotaService);
+  autopilotService = AutopilotService.getInstance(quotaService);
+  statusBarManager = new StatusBarManager(quotaService, taskSessionService, autopilotService);
+  treeDataProvider = new QuotaTreeDataProvider(quotaService, autopilotService);
 
   // Register Tree View in Activity Bar
   context.subscriptions.push(
@@ -29,7 +35,7 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
-  // Register Commands
+  // Refresh Quota Limits
   context.subscriptions.push(
     vscode.commands.registerCommand('antigravityLimitMonitor.refresh', async () => {
       await vscode.window.withProgress(
@@ -42,12 +48,13 @@ export function activate(context: vscode.ExtensionContext) {
           try {
             const quota = await quotaService.refresh(true);
             if (quota) {
-              vscode.window.showInformationMessage(
-                `AI Limits refreshed successfully at ${quota.lastUpdated.toLocaleTimeString()}`
+              vscode.window.setStatusBarMessage(
+                `Quota synced at ${quota.lastUpdated.toLocaleTimeString()}`,
+                3000
               );
             } else {
               const choice = await vscode.window.showErrorMessage(
-                'Unable to retrieve AI model limits from Language Server.',
+                'Unable to retrieve AI model limits from Antigravity Language Server.',
                 'Open Logs'
               );
               if (choice === 'Open Logs') {
@@ -68,313 +75,260 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Open Dashboard
   context.subscriptions.push(
     vscode.commands.registerCommand('antigravityLimitMonitor.showDashboard', () => {
-      DashboardWebviewPanel.createOrShow(context.extensionUri, quotaService, taskSessionService, autoAcceptService);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('antigravityLimitMonitor.toggleAutoAccept', async () => {
-      await autoAcceptService.toggle();
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('antigravityLimitMonitor.setAutoAcceptChoice', async () => {
-      const isCdpAvailable = await autoAcceptService.checkCdpPort();
-      const currentChoice = autoAcceptService.getChoice();
-
-      const items = [
-        {
-          label: isCdpAvailable
-            ? '$(check) Option 1: Allow this time (Once)'
-            : '$(check) Option 1: Standard Auto (Native Engine)',
-          description: currentChoice === 1 ? '[Active]' : '',
-          detail: isCdpAvailable
-            ? 'Auto-approves individual terminal commands and file edits one at a time'
-            : 'Auto-executes terminal commands and file edits via IDE native engine (No Port 9333 required)',
-          choice: 1 as AutoAcceptChoice,
-          disabled: false,
-        },
-        {
-          label: isCdpAvailable
-            ? '$(comment-discussion) Option 2: Allow in this conversation (Recommended)'
-            : '$(lock) Option 2: In conversation [Requires Debug Port 9333]',
-          description: currentChoice === 2 ? '[Active]' : (isCdpAvailable ? '' : '[Locked]'),
-          detail: isCdpAvailable
-            ? 'Auto-approves operations throughout the active chat conversation'
-            : 'Requires Antigravity IDE launched with --remote-debugging-port=9333 to auto-select dialog options',
-          choice: 2 as AutoAcceptChoice,
-          disabled: !isCdpAvailable,
-        },
-        {
-          label: isCdpAvailable
-            ? '$(shield) Option 3: Always allow (Permanent)'
-            : '$(lock) Option 3: Always allow [Requires Debug Port 9333]',
-          description: currentChoice === 3 ? '[Active]' : (isCdpAvailable ? '' : '[Locked]'),
-          detail: isCdpAvailable
-            ? 'Permanent approval without asking again'
-            : 'Requires Antigravity IDE launched with --remote-debugging-port=9333 for DOM-level auto-selection',
-          choice: 3 as AutoAcceptChoice,
-          disabled: !isCdpAvailable,
-        },
-      ];
-
-      const modeTitle = isCdpAvailable ? 'CDP Mode' : 'Standard Mode';
-      const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: `Select Auto-Accept Option (Current: Option ${currentChoice} · ${modeTitle})`,
-      });
-
-      if (selected) {
-        if (selected.disabled) {
-          vscode.window.showWarningMessage(
-            `Option ${selected.choice} requires Antigravity IDE to be launched with --remote-debugging-port=9333. You can continue using Standard Auto without any port.`,
-            'Auto-Patch Shortcuts (Windows)',
-            'Dismiss'
-          ).then(async (action) => {
-            if (action === 'Auto-Patch Shortcuts (Windows)') {
-              const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
-              const port = config.get<number>('autoAccept.cdpPort', 9333);
-              const res = await autoAcceptService.patchWindowsShortcuts(port);
-              if (res.newlyPatched > 0) {
-                vscode.window.showInformationMessage(
-                  `Antigravity shortcuts patched with port ${port}. Please close and reopen Antigravity from your Desktop shortcut to activate CDP Autopilot.`
-                );
-              } else if (res.alreadyPatched > 0) {
-                vscode.window.showInformationMessage(
-                  `All ${res.alreadyPatched} Antigravity shortcuts already have port ${port}. Please close Antigravity completely and reopen it from your Desktop shortcut to activate Port ${port}.`
-                );
-              }
-            }
-          });
-          return;
-        }
-
-        await autoAcceptService.setChoice(selected.choice, true);
-        vscode.window.setStatusBarMessage(
-          `$(zap) Auto-Accept set to Option ${selected.choice} (${autoAcceptService.getChoiceLabel(selected.choice)})`,
-          3000
-        );
-      }
-    })
-  );
-
-  // Direct option selection commands from status bar hover tooltip links
-  context.subscriptions.push(
-    vscode.commands.registerCommand('antigravityLimitMonitor.selectOpt1', async () => {
-      await autoAcceptService.setChoice(1, true);
-      const isCdp = autoAcceptService.getIsCdpAvailable();
-      const label = isCdp ? 'Option 1: Allow once' : 'Option 1: Standard Auto';
-      vscode.window.setStatusBarMessage(`$(zap) Auto-Accept set to ${label}`, 3000);
-    }),
-    vscode.commands.registerCommand('antigravityLimitMonitor.selectOpt2', async () => {
-      const isCdp = await autoAcceptService.checkCdpPort();
-      if (!isCdp) {
-        vscode.window.showWarningMessage(
-          'Option 2 (In conversation) requires Antigravity IDE to be launched with --remote-debugging-port=9333.',
-          'Dismiss'
-        );
-        return;
-      }
-      await autoAcceptService.setChoice(2, true);
-      vscode.window.setStatusBarMessage('$(zap) Auto-Accept set to Option 2: In conversation (Recommended)', 3000);
-    }),
-    vscode.commands.registerCommand('antigravityLimitMonitor.relaunchWithPort', async () => {
-      const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
-      const port = config.get<number>('autoAccept.cdpPort', 9333);
-      const action = await vscode.window.showInformationMessage(
-        `Antigravity IDE will close and restart with Port ${port} in 2 seconds to activate 100% Hands-free CDP Autopilot. Please ensure all your files are saved.`,
-        'Restart Now',
-        'Cancel'
+      DashboardWebviewPanel.createOrShow(
+        context.extensionUri,
+        quotaService,
+        taskSessionService,
+        autopilotService
       );
-      if (action === 'Restart Now') {
-        await autoAcceptService.relaunchWithDebugPort(port);
-      }
-    }),
-    vscode.commands.registerCommand('antigravityLimitMonitor.patchShortcuts', async () => {
-      const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
-      const port = config.get<number>('autoAccept.cdpPort', 9333);
-      const res = await autoAcceptService.patchWindowsShortcuts(port);
-      if (res.newlyPatched > 0) {
-        vscode.window.showInformationMessage(
-          `Successfully patched ${res.newlyPatched} Antigravity shortcut(s) with --remote-debugging-port=${port}. Please close and reopen Antigravity from your Desktop shortcut to activate CDP Autopilot.`
-        );
-      } else if (res.alreadyPatched > 0) {
-        vscode.window.showInformationMessage(
-          `All ${res.alreadyPatched} Antigravity shortcut(s) on Desktop and Start Menu already have --remote-debugging-port=${port}. Please close Antigravity completely and reopen it from your Desktop shortcut to activate Port ${port}.`
-        );
-      } else {
-        vscode.window.showWarningMessage(
-          `Could not find Antigravity shortcuts on Desktop or Start Menu. Please launch Antigravity with: "Antigravity IDE.exe" --remote-debugging-port=${port}`
-        );
-      }
-    }),
-    vscode.commands.registerCommand('antigravityLimitMonitor.selectOpt3', async () => {
-      const isCdp = await autoAcceptService.checkCdpPort();
-      if (!isCdp) {
-        vscode.window.showWarningMessage(
-          'Option 3 (Always allow) requires Antigravity IDE to be launched with --remote-debugging-port=9333.',
-          'Dismiss'
-        );
-        return;
-      }
-      await autoAcceptService.setChoice(3, true);
-      vscode.window.setStatusBarMessage('$(zap) Auto-Accept set to Option 3: Always allow (Permanent)', 3000);
     })
   );
 
-  // Quick Action Menu for Auto-Accept
+  // Toggle Turbo Autopilot (1-Click Status Bar + Backwards-compatible alias)
+  const handleToggleTurbo = async () => {
+    await autopilotService.toggleTurboMode();
+  };
   context.subscriptions.push(
-    vscode.commands.registerCommand('antigravityLimitMonitor.openAutoAcceptMenu', async () => {
-      const isAuto = autoAcceptService.getStatus();
-      const currentChoice = autoAcceptService.getChoice();
-      const isCdp = await autoAcceptService.checkCdpPort();
+    vscode.commands.registerCommand('antigravityLimitMonitor.toggleTurbo', handleToggleTurbo),
+    vscode.commands.registerCommand('antigravityLimitMonitor.toggleAutoAccept', handleToggleTurbo)
+  );
 
-      const items: (vscode.QuickPickItem & { action: string; choice?: AutoAcceptChoice; disabled?: boolean })[] = [
-        {
-          label: isAuto ? '$(circle-slash) Turn OFF Auto-Accept' : '$(zap) Turn ON Auto-Accept',
-          description: isAuto ? 'Click to Pause' : 'Click to Enable',
-          action: 'toggle',
-        },
-        {
-          label: isCdp ? '$(check) Option 1: Allow this time (Once)' : '$(check) Option 1: Standard Auto (Native Engine)',
-          description: currentChoice === 1 ? '[Active]' : '',
-          action: 'setChoice',
-          choice: 1,
-        },
-        {
-          label: isCdp
-            ? '$(comment-discussion) Option 2: Allow in this conversation (Recommended)'
-            : '$(lock) Option 2: In conversation [Requires Debug Port 9333]',
-          description: currentChoice === 2 ? '[Active]' : (isCdp ? '' : '[Locked]'),
-          action: 'setChoice',
-          choice: 2,
-          disabled: !isCdp,
-        },
-        {
-          label: isCdp
-            ? '$(shield) Option 3: Always allow (Permanent)'
-            : '$(lock) Option 3: Always allow [Requires Debug Port 9333]',
-          description: currentChoice === 3 ? '[Active]' : (isCdp ? '' : '[Locked]'),
-          action: 'setChoice',
-          choice: 3,
-          disabled: !isCdp,
-        },
-      ];
-
-      const modeTitle = isCdp ? `Opt ${currentChoice} · CDP` : 'Standard';
-      const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: `Auto-Accept is ${isAuto ? 'ON (' + modeTitle + ')' : 'OFF'} — Select action`,
-      });
-
-      if (!selected) return;
-
-      if (selected.action === 'toggle') {
-        await autoAcceptService.toggle();
-      } else if (selected.action === 'setChoice' && selected.choice) {
-        if (selected.disabled) {
-          vscode.window.showWarningMessage(
-            `Option ${selected.choice} requires Antigravity IDE to be launched with --remote-debugging-port=9333.`,
-            'Dismiss'
-          );
+  // Set Global Permissions (Permission Preset)
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'antigravityLimitMonitor.setPermissionPreset',
+      async (presetArg?: PermissionPreset) => {
+        if (
+          presetArg === 'turbo' ||
+          presetArg === 'default' ||
+          presetArg === 'request_review'
+        ) {
+          await autopilotService.setPermissionPreset(presetArg);
           return;
         }
-        await autoAcceptService.setChoice(selected.choice, true);
-        vscode.window.setStatusBarMessage(
-          `$(zap) Auto-Accept set to Option ${selected.choice} (${autoAcceptService.getChoiceLabel(selected.choice)})`,
-          3000
-        );
+
+        const current = autopilotService.getPermissionPreset();
+        const items: (vscode.QuickPickItem & { value: PermissionPreset })[] = [
+          {
+            label: '$(zap) Turbo',
+            description: current === 'turbo' ? 'Active' : '',
+            detail: 'Allow tools, file edits, and terminal commands automatically without prompts',
+            value: 'turbo',
+          },
+          {
+            label: '$(shield) Default',
+            description: current === 'default' ? 'Active' : '',
+            detail: 'Standard Antigravity permission prompts for sensitive actions',
+            value: 'default',
+          },
+          {
+            label: '$(lock) Request Review',
+            description: current === 'request_review' ? 'Active' : '',
+            detail: 'Always ask for confirmation before running commands or external edits',
+            value: 'request_review',
+          },
+        ];
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: `Select Global Permissions Preset (Current: ${AutopilotService.formatPresetLabel(current)})`,
+        });
+
+        if (selected) {
+          await autopilotService.setPermissionPreset(selected.value);
+        }
       }
-    })
+    )
   );
 
+  // Set Agent Behavior -> Plan Review Policy
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'antigravityLimitMonitor.setPlanReviewPolicy',
+      async (policyArg?: PlanReviewPolicy) => {
+        if (policyArg === 'always_proceed' || policyArg === 'always_ask') {
+          await autopilotService.setPlanReviewPolicy(policyArg);
+          return;
+        }
+
+        const current = autopilotService.getPlanReviewPolicy();
+        const items: (vscode.QuickPickItem & { value: PlanReviewPolicy })[] = [
+          {
+            label: '$(checklist) Always Proceed',
+            description: current === 'always_proceed' ? 'Active' : '',
+            detail: 'Agent executes plans automatically without pausing for review',
+            value: 'always_proceed',
+          },
+          {
+            label: '$(checklist) Always Ask',
+            description: current === 'always_ask' ? 'Active' : '',
+            detail: 'Agent asks you to review implementation plans before proceeding',
+            value: 'always_ask',
+          },
+        ];
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: `Select Plan Review Policy (Current: ${AutopilotService.formatPlanPolicyLabel(current)})`,
+        });
+
+        if (selected) {
+          await autopilotService.setPlanReviewPolicy(selected.value);
+        }
+      }
+    )
+  );
+
+  // Show Logs
   context.subscriptions.push(
     vscode.commands.registerCommand('antigravityLimitMonitor.showLogs', () => {
       quotaService.showOutputChannel();
     })
   );
 
+  // Clear Activity History
   context.subscriptions.push(
     vscode.commands.registerCommand('antigravityLimitMonitor.clearHistory', async () => {
       const confirm = await vscode.window.showWarningMessage(
-        'Are you sure you want to clear all 1,000 recorded activity logs?',
+        'Clear all recorded AI activity history logs?',
         'Clear History',
         'Cancel'
       );
       if (confirm === 'Clear History') {
         await taskSessionService.clearHistory();
-        vscode.window.showInformationMessage('Activity logs cleared.');
+        vscode.window.setStatusBarMessage('Activity history cleared.', 3000);
       }
     })
   );
 
-  // Consolidated Status Bar Quick Menu
+  // Clean Quick Menu Shortcut (Ctrl+Alt+A / Cmd+Alt+A)
   context.subscriptions.push(
     vscode.commands.registerCommand('antigravityLimitMonitor.openQuickMenu', async () => {
+      autopilotService.syncFromDisk(false);
+      const cfg = autopilotService.getConfig();
       const summary = taskSessionService.getTodaySummary();
-      const activityDesc = summary.logCountToday > 0
-        ? `Used today: -${summary.totalUsedTodayPct}% across ${summary.logCountToday} turns`
-        : 'View full quota breakdown, live gauges & 1,000 activity logs';
+      const activityDesc =
+        summary.logCountToday > 0
+          ? `Used today: -${summary.totalUsedTodayPct}% (${summary.logCountToday} turns)`
+          : 'View model quotas & activity history';
 
-      const isAuto = autoAcceptService.getStatus();
-      const autoLabel = isAuto ? '$(zap) Auto-Accept: ON' : '$(circle-slash) Auto-Accept: OFF';
-      const autoDesc = isAuto
-        ? 'Active — auto-approving file edits & terminal commands (Click to pause)'
-        : 'Paused — click to enable hands-free auto-approval';
-
-      const choiceNum = autoAcceptService.getChoice();
-      const choiceLabel = autoAcceptService.getChoiceLabel();
-      const choiceText = `$(settings-gear) Auto-Accept Option: ${choiceNum} (${choiceLabel})`;
-
-      const items = [
+      const items: ActionQuickPickItem[] = [
         {
-          label: '$(dashboard) Open AI Limits Dashboard',
+          label: 'Autopilot',
+          kind: vscode.QuickPickItemKind.Separator,
+        },
+        {
+          label: `$(zap) Toggle Turbo Autopilot`,
+          description: `Currently: ${cfg.isTurboActive ? 'ON' : 'OFF'}`,
+          action: 'toggleTurbo',
+        },
+        {
+          label: 'Global Permissions',
+          kind: vscode.QuickPickItemKind.Separator,
+        },
+        {
+          label: '$(shield) Global Permissions: Turbo',
+          description:
+            cfg.permissionPreset === 'turbo'
+              ? 'Active · Allow tools & commands without prompts'
+              : 'Allow tools & commands without prompts',
+          action: 'setPreset',
+          preset: 'turbo',
+        },
+        {
+          label: '$(shield) Global Permissions: Default',
+          description:
+            cfg.permissionPreset === 'default'
+              ? 'Active · Standard permission prompts'
+              : 'Standard permission prompts',
+          action: 'setPreset',
+          preset: 'default',
+        },
+        {
+          label: '$(shield) Global Permissions: Request Review',
+          description:
+            cfg.permissionPreset === 'request_review'
+              ? 'Active · Ask before commands & external edits'
+              : 'Ask before commands & external edits',
+          action: 'setPreset',
+          preset: 'request_review',
+        },
+        {
+          label: 'Agent Behavior',
+          kind: vscode.QuickPickItemKind.Separator,
+        },
+        {
+          label: '$(checklist) Plan Review Policy: Always Proceed',
+          description:
+            cfg.planReviewPolicy === 'always_proceed'
+              ? 'Active · Auto-execute plans'
+              : 'Auto-execute plans',
+          action: 'setPolicy',
+          policy: 'always_proceed',
+        },
+        {
+          label: '$(checklist) Plan Review Policy: Always Ask',
+          description:
+            cfg.planReviewPolicy === 'always_ask'
+              ? 'Active · Wait for user review'
+              : 'Wait for user review',
+          action: 'setPolicy',
+          policy: 'always_ask',
+        },
+        {
+          label: 'Quota & Monitoring',
+          kind: vscode.QuickPickItemKind.Separator,
+        },
+        {
+          label: '$(graph) Open Model Limit Dashboard',
           description: activityDesc,
           action: 'dashboard',
         },
         {
-          label: autoLabel,
-          description: autoDesc,
-          action: 'toggleAutoAccept',
-        },
-        {
-          label: choiceText,
-          description: 'Choose between Allow once, In conversation, or Always allow',
-          action: 'setAutoAcceptChoice',
-        },
-        {
-          label: '$(refresh) Refresh AI Limits Now',
-          description: 'Fetch latest usage from Language Server',
+          label: '$(refresh) Refresh Quota Limits',
+          description: 'Sync latest usage from Antigravity Engine',
           action: 'refresh',
         },
         {
-          label: '$(settings-gear) Switch Status Bar Format...',
-          description: 'Change how limits are shown in the status bar',
+          label: '$(sliders) Switch Status Bar Display Mode',
+          description: 'All Models, 5h Only, Gemini Only, Compact, or Smart Lowest',
           action: 'format',
         },
         {
-          label: '$(trash) Clear Activity History Logs...',
-          description: 'Clear up to 1,000 saved AI activity records',
+          label: '$(trash) Clear Activity History',
+          description: 'Clear saved activity logs',
           action: 'clearHistory',
         },
       ];
 
       const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Antigravity AI Limits Quick Menu',
+        placeHolder: `Antigravity Autopilot — Permissions: ${AutopilotService.formatPresetLabel(cfg.permissionPreset)} · Plan: ${AutopilotService.formatPlanPolicyLabel(cfg.planReviewPolicy)}`,
       });
 
-      if (!selected) return;
+      if (!selected || !selected.action) return;
 
       switch (selected.action) {
+        case 'toggleTurbo':
+          await autopilotService.toggleTurboMode();
+          break;
+        case 'setPreset':
+          if (selected.preset) {
+            await autopilotService.setPermissionPreset(selected.preset);
+          }
+          break;
+        case 'setPolicy':
+          if (selected.policy) {
+            await autopilotService.setPlanReviewPolicy(selected.policy);
+          }
+          break;
         case 'dashboard':
-          DashboardWebviewPanel.createOrShow(context.extensionUri, quotaService, taskSessionService, autoAcceptService);
-          break;
-        case 'toggleAutoAccept':
-          vscode.commands.executeCommand('antigravityLimitMonitor.toggleAutoAccept');
-          break;
-        case 'setAutoAcceptChoice':
-          vscode.commands.executeCommand('antigravityLimitMonitor.setAutoAcceptChoice');
+          DashboardWebviewPanel.createOrShow(
+            context.extensionUri,
+            quotaService,
+            taskSessionService,
+            autopilotService
+          );
           break;
         case 'refresh':
           vscode.commands.executeCommand('antigravityLimitMonitor.refresh');
@@ -389,34 +343,53 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Switch Status Bar Display Mode
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'antigravityLimitMonitor.toggleDisplayMode',
       async () => {
+        const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+        const currentMode = config.get<string>('statusBarFormat', 'all');
+
         const modes = [
           {
-            label: 'All Active Models (Default)',
-            description: 'Show both Gemini & Claude (e.g. Gem: 57% | Cl: 100%)',
+            label: 'All Active Models',
+            description:
+              currentMode === 'all'
+                ? 'Active · e.g. Gemi: 95% | Cl: 100% | Ar: 32%'
+                : 'e.g. Gemi: 95% | Cl: 100% | Ar: 32%',
             value: 'all',
           },
           {
-            label: 'Gemini Only',
-            description: 'Show Gemini 5h & Weekly limits',
-            value: 'geminiOnly',
-          },
-          {
-            label: '5-Hour Limit Only',
-            description: 'Show only 5-hour rolling limits',
+            label: '5-Hour Limit Preferred',
+            description:
+              currentMode === 'fiveHourOnly'
+                ? 'Active · Shows 5h limit when available, weekly for weekly-only models'
+                : 'Shows 5h limit when available, weekly for weekly-only models',
             value: 'fiveHourOnly',
           },
           {
+            label: 'Gemini Family Only',
+            description:
+              currentMode === 'geminiOnly'
+                ? 'Active · Shows Gemini & Argon models only'
+                : 'Shows Gemini & Argon models only',
+            value: 'geminiOnly',
+          },
+          {
             label: 'Compact',
-            description: 'Show only lowest percentage badge (e.g. 57%)',
+            description:
+              currentMode === 'compact'
+                ? 'Active · e.g. Quota: 32% (Ar)'
+                : 'e.g. Quota: 32% (Ar)',
             value: 'compact',
           },
           {
             label: 'Smart Lowest',
-            description: 'Automatically highlights the lowest remaining quota',
+            description:
+              currentMode === 'smartLowest'
+                ? 'Active · Shows only the group with lowest remaining quota'
+                : 'Shows only the group with lowest remaining quota',
             value: 'smartLowest',
           },
         ];
@@ -426,7 +399,6 @@ export function activate(context: vscode.ExtensionContext) {
         });
 
         if (selected) {
-          const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
           await config.update(
             'statusBarFormat',
             selected.value,
@@ -446,24 +418,29 @@ export function activate(context: vscode.ExtensionContext) {
     const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
     const threshold = config.get<number>('lowQuotaWarningThreshold', 20);
 
-    if (threshold > 0 && quota.lowestFraction * 100 <= threshold) {
+    if (threshold > 0 && quota.groups.length > 0 && quota.lowestFraction * 100 <= threshold) {
       if (!hasAlertedForLowQuota) {
         hasAlertedForLowQuota = true;
         const pct = QuotaService.formatPercentage(quota.lowestFraction);
+        const groupSuffix = quota.lowestGroupName ? ` (${quota.lowestGroupName})` : '';
         vscode.window
           .showWarningMessage(
-            `Low AI Model Quota: Remaining limit is down to ${pct}!`,
+            `Low AI Model Quota${groupSuffix}: Remaining limit is ${pct}.`,
             'Open Dashboard',
             'Dismiss'
           )
           .then((choice) => {
             if (choice === 'Open Dashboard') {
-              DashboardWebviewPanel.createOrShow(context.extensionUri, quotaService, taskSessionService, autoAcceptService);
+              DashboardWebviewPanel.createOrShow(
+                context.extensionUri,
+                quotaService,
+                taskSessionService,
+                autopilotService
+              );
             }
           });
       }
     } else if (quota.lowestFraction * 100 > threshold + 10) {
-      // Reset alert state when quota recovers/refreshes
       hasAlertedForLowQuota = false;
     }
   });
@@ -473,7 +450,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('antigravityLimitMonitor.refreshIntervalSeconds')) {
         const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
-        const interval = config.get<number>('refreshIntervalSeconds', 30);
+        const interval = config.get<number>('refreshIntervalSeconds', 10);
         quotaService.startPolling(interval);
       }
       if (
@@ -488,10 +465,11 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // On window focus, check for quota changes in background
+  // On window focus, sync quota and external config updates
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((state) => {
       if (state.focused) {
+        autopilotService.syncFromDisk(true);
         quotaService.refresh(false).catch(() => {});
       }
     })
@@ -506,8 +484,8 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  if (autoAcceptService) {
-    autoAcceptService.dispose();
+  if (autopilotService) {
+    autopilotService.dispose();
   }
 
   if (quotaService) {

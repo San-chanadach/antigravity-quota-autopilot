@@ -1,32 +1,32 @@
 import * as vscode from 'vscode';
 import { QuotaService } from '../quotaService';
 import { TaskSessionService } from '../taskSessionService';
-import { AutoAcceptService } from '../autoAcceptService';
-import { ParsedQuotaInfo, QuotaBucket, QuotaGroup } from '../types';
+import { AutopilotService } from '../autopilotService';
+import { ParsedQuotaInfo, PermissionPreset, PlanReviewPolicy, QuotaGroup } from '../types';
 
 export class StatusBarManager implements vscode.Disposable {
   private unifiedStatusBarItem: vscode.StatusBarItem;
   private quotaService: QuotaService;
   private taskSessionService: TaskSessionService;
-  private autoAcceptService: AutoAcceptService;
+  private autopilotService: AutopilotService;
   private lastQuota: ParsedQuotaInfo | undefined;
 
   constructor(
     quotaService: QuotaService,
     taskSessionService?: TaskSessionService,
-    autoAcceptService?: AutoAcceptService
+    autopilotService?: AutopilotService
   ) {
     this.quotaService = quotaService;
     this.taskSessionService = taskSessionService || TaskSessionService.getInstance();
-    this.autoAcceptService = autoAcceptService || AutoAcceptService.getInstance();
+    this.autopilotService = autopilotService || AutopilotService.getInstance(quotaService);
 
     // Single unified status bar item (Priority 100)
-    // Clicking toggles Auto-Accept directly: Auto:ON <-> Auto:OFF
+    // Clicking toggles Turbo Autopilot directly: Turbo: ON <-> Turbo: OFF
     this.unifiedStatusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Right,
       100
     );
-    this.unifiedStatusBarItem.command = 'antigravityLimitMonitor.toggleAutoAccept';
+    this.unifiedStatusBarItem.command = 'antigravityLimitMonitor.toggleTurbo';
 
     this.render();
     this.unifiedStatusBarItem.show();
@@ -45,9 +45,8 @@ export class StatusBarManager implements vscode.Disposable {
     this.taskSessionService.on('activityLogged', () => this.render());
     this.taskSessionService.on('historyCleared', () => this.render());
 
-    // Event listeners for Auto-Accept status
-    this.autoAcceptService.on('stateChanged', () => this.render());
-    this.autoAcceptService.on('choiceChanged', () => this.render());
+    // Event listener for Native Autopilot settings
+    this.autopilotService.on('configChanged', () => this.render());
   }
 
   public update(quota: ParsedQuotaInfo): void {
@@ -57,49 +56,24 @@ export class StatusBarManager implements vscode.Disposable {
 
   private render(): void {
     const config = vscode.workspace.getConfiguration('antigravityLimitMonitor');
+    const format = config.get<string>('statusBarFormat', 'all');
     const showAlertColors = config.get<boolean>('showStatusAlertColors', true);
 
-    const isAuto = this.autoAcceptService.getStatus();
-    const isCdp = this.autoAcceptService.getIsCdpAvailable();
-    const autoStatus = isAuto ? (isCdp ? 'Auto:ON' : 'Auto:ON(Std)') : 'Auto:OFF';
+    const isTurbo = this.autopilotService.isTurboActive();
+    const turboText = isTurbo ? 'Turbo: ON' : 'Turbo: OFF';
 
-    let gPct = '--%';
-    let cPct = '--%';
+    let quotaPart = 'Quota: ...';
 
-    if (this.lastQuota) {
-      const geminiGroup = this.lastQuota.groups.find((g) =>
-        g.displayName.toLowerCase().includes('gemini')
-      );
-      const claudeGroup = this.lastQuota.groups.find(
-        (g) =>
-          g.displayName.toLowerCase().includes('claude') ||
-          g.displayName.toLowerCase().includes('gpt') ||
-          g.displayName.toLowerCase().includes('3p')
-      );
-
-      const gemini5h = this.findBucket(geminiGroup, '5h');
-      const geminiWeekly = this.findBucket(geminiGroup, 'weekly');
-      const claude5h = this.findBucket(claudeGroup, '5h');
-      const claudeWeekly = this.findBucket(claudeGroup, 'weekly');
-
-      const getEffectivePct = (bucket: QuotaBucket | undefined, weekly: QuotaBucket | undefined): string => {
-        const target = bucket || weekly;
-        if (!target) return '100%';
-        if (target.disabled || (weekly && weekly.remainingFraction <= 0)) {
-          return '0%';
-        }
-        return QuotaService.formatPercentage(target.remainingFraction);
-      };
-
-      gPct = getEffectivePct(gemini5h, geminiWeekly);
-      cPct = getEffectivePct(claude5h, claudeWeekly);
+    if (this.lastQuota && this.lastQuota.groups.length > 0) {
+      quotaPart = this.formatQuotaSegments(this.lastQuota.groups, format);
+    } else if (this.lastQuota && this.lastQuota.groups.length === 0) {
+      quotaPart = 'Quota: N/A';
     }
 
-    // Exact format requested: Gemi:80% | Cl:80% Auto: ON
-    this.unifiedStatusBarItem.text = `Gemi:${gPct} | Cl:${cPct} Auto: ${autoStatus}`;
+    this.unifiedStatusBarItem.text = `${quotaPart} | ${turboText}`;
 
-    // Color indicators
-    if (showAlertColors && this.lastQuota) {
+    // Minimalist status alert colors
+    if (showAlertColors && this.lastQuota && this.lastQuota.groups.length > 0) {
       if (this.lastQuota.lowestFraction <= 0.15) {
         this.unifiedStatusBarItem.backgroundColor = new vscode.ThemeColor(
           'statusBarItem.errorBackground'
@@ -112,156 +86,243 @@ export class StatusBarManager implements vscode.Disposable {
         this.unifiedStatusBarItem.color = new vscode.ThemeColor('statusBarItem.warningForeground');
       } else {
         this.unifiedStatusBarItem.backgroundColor = undefined;
-        this.unifiedStatusBarItem.color = isAuto ? new vscode.ThemeColor('charts.green') : undefined;
+        this.unifiedStatusBarItem.color = isTurbo ? new vscode.ThemeColor('charts.green') : undefined;
       }
     } else {
       this.unifiedStatusBarItem.backgroundColor = undefined;
-      this.unifiedStatusBarItem.color = isAuto ? new vscode.ThemeColor('charts.green') : undefined;
+      this.unifiedStatusBarItem.color = isTurbo ? new vscode.ThemeColor('charts.green') : undefined;
     }
 
-    // Tooltip with mouse hover option picker!
     this.unifiedStatusBarItem.tooltip = this.buildCombinedTooltip();
   }
 
+  private formatQuotaSegments(groups: QuotaGroup[], format: string): string {
+    const calcMode = format === 'fiveHourOnly' ? 'fiveHourPreferred' : 'effective';
+
+    if (format === 'compact' || format === 'smartLowest') {
+      let lowestGroup = groups[0];
+      let lowestInfo = QuotaService.getGroupEffectiveQuota(groups[0], 'effective');
+
+      for (let i = 1; i < groups.length; i++) {
+        const info = QuotaService.getGroupEffectiveQuota(groups[i], 'effective');
+        if (info.fraction < lowestInfo.fraction) {
+          lowestInfo = info;
+          lowestGroup = groups[i];
+        }
+      }
+
+      const shortLabel = QuotaService.getShortGroupLabel(lowestGroup);
+      if (format === 'compact') {
+        return groups.length > 1
+          ? `Quota: ${lowestInfo.pct} (${shortLabel})`
+          : `Quota: ${lowestInfo.pct}`;
+      }
+      return `${shortLabel}: ${lowestInfo.pct}`;
+    }
+
+    let targetGroups = groups;
+    if (format === 'geminiOnly') {
+      const geminiGroups = groups.filter((g) => {
+        const t = QuotaService.identifyGroupType(g);
+        return t === 'gemini' || t === 'argon';
+      });
+      if (geminiGroups.length > 0) {
+        targetGroups = geminiGroups;
+      }
+    }
+
+    const segments = targetGroups.map((group) => {
+      const label = QuotaService.getShortGroupLabel(group);
+      const info = QuotaService.getGroupEffectiveQuota(group, calcMode);
+      return `${label}: ${info.pct}`;
+    });
+
+    return segments.join(' | ');
+  }
+
   public showQuotaError(err: Error): void {
-    const isAuto = this.autoAcceptService.getStatus();
-    const autoStatus = isAuto ? 'ON' : 'OFF';
-    this.unifiedStatusBarItem.text = `$(warning) Gemi:--% | Cl:--% Auto: ${autoStatus}`;
-    this.unifiedStatusBarItem.backgroundColor = new vscode.ThemeColor(
-      'statusBarItem.warningBackground'
-    );
-    this.unifiedStatusBarItem.color = undefined;
+    const isTurbo = this.autopilotService.isTurboActive();
+    const turboText = isTurbo ? 'Turbo: ON' : 'Turbo: OFF';
+
+    if (!this.lastQuota) {
+      this.unifiedStatusBarItem.text = `Quota: Offline | ${turboText}`;
+      this.unifiedStatusBarItem.backgroundColor = new vscode.ThemeColor(
+        'statusBarItem.warningBackground'
+      );
+      this.unifiedStatusBarItem.color = undefined;
+    }
     this.unifiedStatusBarItem.tooltip = this.buildCombinedTooltip(err.message);
   }
 
-  private findBucket(group: QuotaGroup | undefined, window: '5h' | 'weekly'): QuotaBucket | undefined {
-    if (!group || !group.buckets || group.buckets.length === 0) return undefined;
-    const match =
-      group.buckets.find((b) => b.window === window) ||
-      group.buckets.find((b) => b.bucketId.includes(window)) ||
-      group.buckets.find((b) =>
-        window === '5h'
-          ? b.displayName.toLowerCase().includes('5-hour') || b.displayName.toLowerCase().includes('five hour')
-          : b.displayName.toLowerCase().includes('weekly')
-      );
-    if (match) return match;
-    if (window === 'weekly' && group.buckets.length === 1) {
-      return group.buckets[0];
+  private buildCmdUri(command: string, ...args: any[]): string {
+    if (args.length === 0) {
+      return `command:${command}`;
     }
-    return undefined;
+    return `command:${command}?${encodeURIComponent(JSON.stringify(args))}`;
   }
 
   private buildCombinedTooltip(errorMessage?: string): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.isTrusted = true;
-    md.supportThemeIcons = true;
+    md.supportThemeIcons = false;
 
-    const isAuto = this.autoAcceptService.getStatus();
-    const choice = this.autoAcceptService.getChoice();
-    const choiceLabel = this.autoAcceptService.getChoiceLabel();
+    const autopilot = this.autopilotService.getConfig();
+    const planBadge = this.lastQuota?.planName
+      ? ` · \`${this.lastQuota.planName}\``
+      : this.lastQuota?.accountTier && this.lastQuota.accountTier !== 'unknown'
+      ? ` · \`${this.lastQuota.accountTier.toUpperCase()}\``
+      : '';
 
-    const isCdp = this.autoAcceptService.getIsCdpAvailable();
-    const modeBadge = isCdp ? 'CDP Mode' : 'Standard Mode';
+    md.appendMarkdown(`**Antigravity Quota & Autopilot**${planBadge}\n\n`);
 
-    // === SECTION 1: AUTO-ACCEPT OPTION SELECTION (MOUSE HOVER) ===
-    md.appendMarkdown(`### $(zap) Auto-Accept: **${isAuto ? '$(check) ON' : '$(circle-slash) OFF'}** *(${modeBadge} · Click status bar to toggle)*\n\n`);
-    md.appendMarkdown(`Current setting: **Option ${choice} — ${choiceLabel}**\n\n`);
-    md.appendMarkdown(`**$(arrow-small-right) Select Option:**\n\n`);
-
-    if (isCdp) {
-      const opt1Active = choice === 1
-        ? `**[$(check) Option 1: Allow once (Single prompt)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt1)**`
-        : `[$(circle-outline) Option 1: Allow once (Single prompt)](command:antigravityLimitMonitor.selectOpt1)`;
-
-      const opt2Active = choice === 2
-        ? `**[$(comment-discussion) Option 2: In conversation (Recommended)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt2)**`
-        : `[$(circle-outline) Option 2: In conversation (Recommended)](command:antigravityLimitMonitor.selectOpt2)`;
-
-      const opt3Active = choice === 3
-        ? `**[$(shield) Option 3: Always allow (Permanent)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt3)**`
-        : `[$(circle-outline) Option 3: Always allow (Permanent)](command:antigravityLimitMonitor.selectOpt3)`;
-
-      md.appendMarkdown(`- ${opt1Active}\n`);
-      md.appendMarkdown(`- ${opt2Active}\n`);
-      md.appendMarkdown(`- ${opt3Active}\n\n`);
-    } else {
-      const opt1Active = `**[$(check) Option 1: Standard Auto (Native Engine)  $(check) [Active]](command:antigravityLimitMonitor.selectOpt1)**`;
-      const opt2Locked = `$(lock) Option 2: In conversation *(Requires Debug Port 9333)*`;
-      const opt3Locked = `$(lock) Option 3: Always allow *(Requires Debug Port 9333)*`;
-
-      md.appendMarkdown(`- ${opt1Active}\n`);
-      md.appendMarkdown(`- ${opt2Locked}\n`);
-      md.appendMarkdown(`- ${opt3Locked}\n\n`);
-      md.appendMarkdown(`*Tip: Standard Auto executes terminal commands and file edits directly via IDE native engine without needing Port 9333.*\n\n`);
-    }
-    md.appendMarkdown(`---\n\n`);
-
-    // === SECTION 2: TODAY'S ACTIVITY SUMMARY ===
-    const todaySummary = this.taskSessionService.getTodaySummary();
-    if (todaySummary.logCountToday > 0) {
-      md.appendMarkdown(`### $(history) Activity Today\n\n`);
-      md.appendMarkdown(
-        `- $(flame) **Used Today:** \`-${todaySummary.totalUsedTodayPct}%\` across \`${todaySummary.logCountToday}\` requests\n`
-      );
-      if (todaySummary.latestEntry) {
-        const d = new Date(todaySummary.latestEntry.timestamp);
-        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        md.appendMarkdown(
-          `- $(history) **Latest:** \`-${todaySummary.latestEntry.usedPct}%\` (${todaySummary.latestEntry.groupName}) at ${timeStr}\n\n`
-        );
-      }
-      md.appendMarkdown(`---\n\n`);
+    if (this.lastQuota?.userEmail) {
+      md.appendMarkdown(`Account: \`${this.lastQuota.userEmail}\`\n\n`);
     }
 
-    // === SECTION 3: AI LIMITS ===
-    md.appendMarkdown(`### $(graph) Antigravity Model Usage Limits\n\n`);
-
-    if (errorMessage) {
-      md.appendMarkdown(`$(warning) *Offline: ${errorMessage}*\n\n`);
+    // === SECTION 1: MINIMALIST QUOTA TABLE ===
+    if (errorMessage && (!this.lastQuota || this.lastQuota.groups.length === 0)) {
+      md.appendMarkdown(`🔴 Offline: ${errorMessage}\n\n`);
     } else if (this.lastQuota && this.lastQuota.groups.length > 0) {
-      if (this.lastQuota.userEmail) {
-        const planStr = this.lastQuota.planName ? ` (${this.lastQuota.planName})` : '';
-        md.appendMarkdown(`- $(account) **Account:** \`${this.lastQuota.userEmail}\`${planStr}\n\n`);
-      }
+      md.appendMarkdown(`| Model Group | Remaining | Reset |\n`);
+      md.appendMarkdown(`| :--- | :--- | :--- |\n`);
 
       for (const group of this.lastQuota.groups) {
-        const isGemini = group.displayName.toLowerCase().includes('gemini');
-        const icon = isGemini ? '$(sparkle)' : '$(hubot)';
-        md.appendMarkdown(`**${icon} ${group.displayName}**\n\n`);
-
-        for (const bucket of group.buckets) {
-          if (bucket.disabled) {
-            md.appendMarkdown(
-              `- 🔴 **${bucket.displayName}:** \`0%\` *(does not apply - weekly limit reached)*\n`
-            );
-          } else {
-            const pct = QuotaService.formatPercentage(bucket.remainingFraction);
-            const resetStr = bucket.resetTime
-              ? ` *($(clock) resets in ${QuotaService.formatTimeUntilReset(bucket.resetTime)})*`
-              : '';
-
-            const progressIcon = this.getProgressIndicator(bucket.remainingFraction);
-            md.appendMarkdown(`- ${progressIcon} **${bucket.displayName}:** \`${pct}\`${resetStr}\n`);
-          }
-        }
-        md.appendMarkdown(`\n`);
+        const row = this.formatTooltipGroupRow(group);
+        md.appendMarkdown(`| ${row.dot} ${group.displayName} | ${row.remaining} | ${row.reset} |\n`);
       }
-      const timeStr = this.lastQuota.lastUpdated.toLocaleTimeString();
-      md.appendMarkdown(`*$(history) Updated at: ${timeStr}*\n\n`);
+      md.appendMarkdown(`\n`);
     } else {
-      md.appendMarkdown(`*$(sync~spin) Loading usage data from Language Server...*\n\n`);
+      md.appendMarkdown(`Loading model quota limits...\n\n`);
     }
 
+    md.appendMarkdown(`---\n\n`);
+
+    // === SECTION 2: NATIVE AUTOPILOT CONTROLS ===
+    const presets: { key: PermissionPreset; label: string }[] = [
+      { key: 'turbo', label: 'Turbo' },
+      { key: 'default', label: 'Default' },
+      { key: 'request_review', label: 'Request Review' },
+    ];
+    const presetLinks = presets
+      .map((p) =>
+        autopilot.permissionPreset === p.key
+          ? `**[${p.label}]**`
+          : `[${p.label}](${this.buildCmdUri('antigravityLimitMonitor.setPermissionPreset', p.key)})`
+      )
+      .join(' · ');
+
+    const policies: { key: PlanReviewPolicy; label: string }[] = [
+      { key: 'always_proceed', label: 'Always Proceed' },
+      { key: 'always_ask', label: 'Always Ask' },
+    ];
+    const policyLinks = policies
+      .map((p) =>
+        autopilot.planReviewPolicy === p.key
+          ? `**[${p.label}]**`
+          : `[${p.label}](${this.buildCmdUri('antigravityLimitMonitor.setPlanReviewPolicy', p.key)})`
+      )
+      .join(' · ');
+
+    md.appendMarkdown(`**Global Permissions:** ${presetLinks}\n\n`);
+    md.appendMarkdown(`**Plan Review Policy:** ${policyLinks}\n\n`);
+    md.appendMarkdown(`---\n\n`);
+
+    // === SECTION 3: SUMMARY & QUICK ACTIONS ===
+    const todaySummary = this.taskSessionService.getTodaySummary();
+    const metaParts: string[] = [];
+    if (todaySummary.logCountToday > 0) {
+      metaParts.push(`Used today: \`-${todaySummary.totalUsedTodayPct}%\` (${todaySummary.logCountToday} turns)`);
+    }
+    if (this.lastQuota) {
+      metaParts.push(`Synced ${this.lastQuota.lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`);
+    }
+    if (metaParts.length > 0) {
+      md.appendMarkdown(`${metaParts.join(' · ')}\n\n`);
+    }
+
+    const toggleLabel = autopilot.isTurboActive ? 'Turn Turbo OFF' : 'Turn Turbo ON';
     md.appendMarkdown(
-      `[$(dashboard) Dashboard](command:antigravityLimitMonitor.showDashboard) | [$(refresh) Refresh](command:antigravityLimitMonitor.refresh) | [$(settings-gear) Quick Menu](command:antigravityLimitMonitor.openQuickMenu)`
+      `[${toggleLabel}](command:antigravityLimitMonitor.toggleTurbo) · ` +
+        `[Dashboard](command:antigravityLimitMonitor.showDashboard) · ` +
+        `[Refresh](command:antigravityLimitMonitor.refresh) · ` +
+        `[Quick Menu](command:antigravityLimitMonitor.openQuickMenu)`
     );
 
     return md;
   }
 
-    private getProgressIndicator(fraction: number): string {
-    if (fraction >= 0.75) return '🟢';
-    if (fraction >= 0.35) return '🟡';
+  private formatTooltipGroupRow(group: QuotaGroup): {
+    dot: string;
+    remaining: string;
+    reset: string;
+  } {
+    const info = QuotaService.getGroupEffectiveQuota(group, 'effective');
+    const dot = this.getStatusDot(info.fraction);
+
+    if (info.weeklyBucket && info.weeklyBucket.remainingFraction <= 0) {
+      const reset = QuotaService.formatTimeUntilReset(info.weeklyBucket.resetTime) || '—';
+      return {
+        dot: '🔴',
+        remaining: '**0%** (Weekly limit)',
+        reset,
+      };
+    }
+
+    if (info.fiveHourBucket && info.weeklyBucket) {
+      const hFrac = info.fiveHourBucket.disabled ? 0 : info.fiveHourBucket.remainingFraction;
+      const wFrac = info.weeklyBucket.disabled ? 0 : info.weeklyBucket.remainingFraction;
+      const hPct = QuotaService.formatPercentage(hFrac);
+      const wPct = QuotaService.formatPercentage(wFrac);
+
+      if (hFrac < wFrac) {
+        const reset =
+          QuotaService.formatTimeUntilReset(info.fiveHourBucket.resetTime || info.weeklyBucket.resetTime) ||
+          '—';
+        return {
+          dot,
+          remaining: `**${hPct}** (W: ${wPct})`,
+          reset,
+        };
+      } else {
+        const reset =
+          QuotaService.formatTimeUntilReset(info.weeklyBucket.resetTime || info.fiveHourBucket.resetTime) ||
+          '—';
+        return {
+          dot,
+          remaining: `**${wPct}** (5h: ${hPct})`,
+          reset,
+        };
+      }
+    }
+
+    if (group.buckets.length === 1) {
+      const b = group.buckets[0];
+      const frac = b.disabled ? 0 : b.remainingFraction;
+      const pct = QuotaService.formatPercentage(frac);
+      const is5h = b.window === '5h' || (b.bucketId || '').toLowerCase().includes('5h');
+      const winLabel = is5h ? '5h' : 'Weekly';
+      const reset = QuotaService.formatTimeUntilReset(b.resetTime) || '—';
+      return {
+        dot: this.getStatusDot(frac),
+        remaining: `**${pct}** (${winLabel})`,
+        reset,
+      };
+    }
+
+    const combined = group.buckets
+      .map((b) => QuotaService.formatPercentage(b.disabled ? 0 : b.remainingFraction))
+      .join(' / ');
+    const firstReset = group.buckets.find((b) => b.resetTime)?.resetTime;
+    return {
+      dot,
+      remaining: `**${combined}**`,
+      reset: QuotaService.formatTimeUntilReset(firstReset) || '—',
+    };
+  }
+
+  private getStatusDot(fraction: number): string {
+    if (fraction > 0.35) return '🟢';
+    if (fraction > 0.15) return '🟡';
     return '🔴';
   }
 

@@ -190,13 +190,19 @@ export class TaskSessionService extends EventEmitter {
           const delta = prevFrac - currentFrac;
           // Trigger when delta >= 0.0001 (0.01%) - captures all AI turns
           if (delta >= 0.0001) {
+            const inferredWindow =
+              bucket.window ||
+              (bucket.bucketId.toLowerCase().includes('weekly') ||
+              bucket.displayName.toLowerCase().includes('weekly')
+                ? 'weekly'
+                : '5h');
             const entry: ActivityLogEntry = {
               id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
               timestamp: new Date().toISOString(),
               promptTitle,
               groupName: group.displayName,
               bucketDisplayName: bucket.displayName,
-              window: bucket.window || '5h',
+              window: inferredWindow,
               usedDeltaFraction: delta,
               usedPct: Math.round(delta * 1000) / 10,
               remainingFraction: currentFrac,

@@ -8,6 +8,8 @@ export interface QuotaBucket {
   disabled?: boolean;
 }
 
+export type ModelGroupType = 'gemini' | 'claude_gpt' | 'argon' | 'other';
+
 export interface QuotaGroup {
   displayName: string;
   description?: string;
@@ -29,21 +31,25 @@ export interface LanguageServerConnection {
   useHttp?: boolean;
 }
 
+export type AccountTier = 'free' | 'pro' | 'ultra' | 'enterprise' | 'unknown';
+
 export interface ParsedQuotaInfo {
   groups: QuotaGroup[];
   description?: string;
   lastUpdated: Date;
   lowestFraction: number;
+  lowestGroupName?: string;
   userEmail?: string;
   userName?: string;
   planName?: string;
+  accountTier?: AccountTier;
 }
 
 export interface ActivityLogEntry {
   id: string;
   timestamp: string; // ISO 8601
   promptTitle?: string; // Short snippet of the user prompt that caused the usage
-  groupName: string; // e.g. "Gemini Models"
+  groupName: string; // e.g. "Gemini Models", "Gemini 4 Argon"
   bucketDisplayName: string; // e.g. "Five Hour Limit Remaining"
   window: string; // "5h" | "weekly"
   usedDeltaFraction: number; // e.g. 0.0185
@@ -52,4 +58,11 @@ export interface ActivityLogEntry {
   remainingPct: number; // e.g. 68.5 (%)
 }
 
-export type AutoAcceptChoice = 1 | 2 | 3;
+export type PermissionPreset = 'turbo' | 'default' | 'request_review';
+export type PlanReviewPolicy = 'always_proceed' | 'always_ask';
+
+export interface AutopilotConfig {
+  isTurboActive: boolean;
+  permissionPreset: PermissionPreset;
+  planReviewPolicy: PlanReviewPolicy;
+}
