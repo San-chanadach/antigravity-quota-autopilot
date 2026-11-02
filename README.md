@@ -11,7 +11,7 @@ A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)*
 ---
 
 <p align="center">
-  <img src="assets/video-preview.gif" alt="Antigravity Quota & Native Autopilot Preview" width="482" />
+  <img src="assets/preview.gif" alt="Antigravity Quota & Native Autopilot Preview" width="482" />
   <br />
   <em>Minimalist Status Bar &amp; Hover Controls: View real-time multi-model quotas (Gemini, Claude/GPT, Argon) and switch Global Permissions or Plan Review Policy in 1 click.</em>
 </p>
