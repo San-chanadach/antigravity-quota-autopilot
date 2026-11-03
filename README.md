@@ -1,6 +1,6 @@
 # Antigravity AI Quota & Auto-Accept Autopilot
 
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.1-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.2-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
 [![Author: San Chanadach](https://img.shields.io/badge/Author-San%20Chanadach-blue.svg)](https://github.com/San-chanadach)
 [![Ko-fi: Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-ff5e5b?style=flat&logo=ko-fi)](https://ko-fi.com/sanchanadach)
 [![Antigravity IDE: v2.6.0+](https://img.shields.io/badge/Antigravity%20IDE-v2.6.0%2B-purple.svg)]()
@@ -11,7 +11,7 @@ A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)*
 ---
 
 <p align="center">
-  <img src="assets/preview.gif" alt="Antigravity Quota & Native Autopilot Preview" width="482" />
+  <img src="https://raw.githubusercontent.com/San-chanadach/antigravity-quota-autopilot/main/assets/preview.gif" alt="Antigravity Quota & Native Autopilot Preview" width="482" />
   <br />
   <em>Minimalist Status Bar &amp; Hover Controls: View real-time multi-model quotas (Gemini, Claude/GPT, Argon) and switch Global Permissions or Plan Review Policy in 1 click.</em>
 </p>
@@ -49,7 +49,7 @@ Control Antigravity's execution permissions and plan review behavior in a single
 Adapts automatically to whatever plan and model groups your account has:
 
 <p align="left">
-  <img src="assets/status-bar.png" alt="Minimalist Multi-Model Status Bar" width="235" />
+  <img src="https://raw.githubusercontent.com/San-chanadach/antigravity-quota-autopilot/main/assets/status-bar.png" alt="Minimalist Multi-Model Status Bar" width="235" />
 </p>
 
 - **Pro / Ultra Multi-Model**: `Gemi: 95% | Cl: 100% | Ar: 32% | Turbo: ON`
@@ -65,7 +65,7 @@ Adapts automatically to whatever plan and model groups your account has:
 ### 3. Minimalist Dashboard & 1,000-Turn Activity Logger
 
 <p align="center">
-  <img src="assets/dashboard.png" alt="Minimalist Quota & Native Autopilot Dashboard" width="760" />
+  <img src="https://raw.githubusercontent.com/San-chanadach/antigravity-quota-autopilot/main/assets/dashboard.png" alt="Minimalist Quota & Native Autopilot Dashboard" width="760" />
 </p>
 
 - **Live Native Controls**: Segmented controls for Global Permissions and Plan Review Policy synced in real time with `~/.gemini/config/config.json` and the Antigravity daemon.
