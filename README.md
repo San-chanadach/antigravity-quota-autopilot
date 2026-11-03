@@ -1,6 +1,6 @@
 # Antigravity AI Quota & Auto-Accept Autopilot
 
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.2-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.1-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
 [![Author: San Chanadach](https://img.shields.io/badge/Author-San%20Chanadach-blue.svg)](https://github.com/San-chanadach)
 [![Ko-fi: Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-ff5e5b?style=flat&logo=ko-fi)](https://ko-fi.com/sanchanadach)
 [![Antigravity IDE: v2.6.0+](https://img.shields.io/badge/Antigravity%20IDE-v2.6.0%2B-purple.svg)]()
@@ -18,8 +18,11 @@ A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)*
 
 ---
 
-## What's New in v1.2.0
+## What's New in v1.2.1
 
+- **Marketplace & Registry Asset Fixes**:
+  - Uses direct raw asset endpoints to ensure preview GIFs and screenshots load reliably on Open VSX and IDE extension views without 302 redirects.
+  - Sanitized demonstration media and updated minimalist UI previews.
 - **Universal Account & Multi-Model Support (Free / Pro / Ultra)**:
   - Dynamically detects and displays all model groups available on your account tier without hardcoded assumptions.
   - Full support for newly separated model buckets such as **Gemini 4 Argon** (`Ar: 32%`) alongside **Gemini Models** (`Gemi`) and **Claude and GPT models** (`Cl`).
@@ -97,7 +100,7 @@ Adapts automatically to whatever plan and model groups your account has:
 3. Click **Install**.
 
 ### Method 2: Install from `.vsix` Release
-1. Download `antigravity-quota-autopilot-1.2.0.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
+1. Download `antigravity-quota-autopilot-1.2.1.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
 2. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) -> **Extensions: Install from VSIX...**.
 3. Select the `.vsix` file and reload the window.
 
