@@ -31,7 +31,7 @@ export interface LanguageServerConnection {
   useHttp?: boolean;
 }
 
-export type AccountTier = 'free' | 'pro' | 'ultra' | 'enterprise' | 'unknown';
+export type AccountTier = 'free' | 'plus' | 'pro' | 'ultra' | 'enterprise' | 'unknown';
 
 export interface ParsedQuotaInfo {
   groups: QuotaGroup[];
@@ -53,9 +53,14 @@ export interface ActivityLogEntry {
   bucketDisplayName: string; // e.g. "Five Hour Limit Remaining"
   window: string; // "5h" | "weekly"
   usedDeltaFraction: number; // e.g. 0.0185
-  usedPct: number; // e.g. 1.9 (%)
+  usedPct: number; // e.g. 1.9 (%) - Primary delta percentage
   remainingFraction: number; // e.g. 0.685
-  remainingPct: number; // e.g. 68.5 (%)
+  remainingPct: number; // e.g. 68.5 (%) - Primary remaining percentage
+  // Unified Turn Fields (5-Hour + Weekly Pool in a single record)
+  fiveHourUsedPct?: number; // e.g. 1.9 (%)
+  fiveHourRemainingPct?: number; // e.g. 98.1 (%)
+  weeklyUsedPct?: number; // e.g. 0.4 (%)
+  weeklyRemainingPct?: number; // e.g. 90.2 (%)
 }
 
 export type PermissionPreset = 'turbo' | 'default' | 'request_review';

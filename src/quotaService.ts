@@ -770,22 +770,21 @@ export class QuotaService extends EventEmitter {
         // If weekly is exhausted or explicitly marked disabled by LSP
         if (
           bucket.disabled ||
-          (isWeeklyExhausted && (bucket.window === '5h' || bucket.bucketId.includes('5h')))
+          (isWeeklyExhausted && (bucket.window === '5h' || (bucket.bucketId || '').includes('5h')))
         ) {
           bucket.disabled = true;
         }
+      }
 
-        if (typeof bucket.remainingFraction === 'number') {
-          const effective = bucket.disabled ? 0 : bucket.remainingFraction;
-          if (effective < lowest) {
-            lowest = effective;
-            lowestGroupName = group.displayName;
-          }
-        }
+      const groupQuota = QuotaService.getGroupEffectiveQuota(group, 'fiveHourPreferred');
+      if (groupQuota.fraction < lowest) {
+        lowest = groupQuota.fraction;
+        lowestGroupName = group.displayName;
       }
     }
 
     const accountTier = QuotaService.detectAccountTier(userInfo?.planName, groups);
+    const normalizedPlanName = QuotaService.getNormalizedPlanLabel(accountTier, userInfo?.planName);
 
     return {
       groups,
@@ -795,13 +794,13 @@ export class QuotaService extends EventEmitter {
       lowestGroupName,
       userEmail: userInfo?.email,
       userName: userInfo?.name,
-      planName: userInfo?.planName,
+      planName: normalizedPlanName || undefined,
       accountTier,
     };
   }
 
   /**
-   * Classifies a model group across Free, Pro, Ultra, and Enterprise accounts.
+   * Classifies a model group across Free, Plus, Pro, Ultra, and Enterprise accounts.
    * Checks 'argon' before 'gemini' since "Gemini 4 Argon" contains "gemini".
    */
   public static identifyGroupType(group: QuotaGroup): ModelGroupType {
@@ -848,7 +847,7 @@ export class QuotaService extends EventEmitter {
   }
 
   /**
-   * Locates the 5-hour or weekly bucket within a group without misclassifying weekly-only groups.
+   * Locates the 5-hour or weekly bucket within a group without misclassifying weekly-only or student/discounted groups.
    */
   public static findBucket(
     group: QuotaGroup | undefined,
@@ -856,34 +855,86 @@ export class QuotaService extends EventEmitter {
   ): QuotaBucket | undefined {
     if (!group || !group.buckets || group.buckets.length === 0) return undefined;
 
-    const match =
-      group.buckets.find((b) => b.window === window) ||
-      group.buckets.find((b) => (b.bucketId || '').toLowerCase().includes(window)) ||
-      group.buckets.find((b) => {
-        const dn = (b.displayName || '').toLowerCase();
-        return window === '5h'
-          ? dn.includes('5-hour') || dn.includes('five hour') || dn.includes('5 hour')
-          : dn.includes('weekly');
-      });
+    const isWeeklyBucket = (b: QuotaBucket): boolean => {
+      const win = (b.window || '').toLowerCase();
+      const id = (b.bucketId || '').toLowerCase();
+      const dn = (b.displayName || '').toLowerCase();
+      return (
+        win === 'weekly' ||
+        win === 'week' ||
+        win === '7d' ||
+        id.includes('weekly') ||
+        id.includes('week') ||
+        id.includes('7d') ||
+        dn.includes('weekly') ||
+        dn.includes('week') ||
+        dn.includes('7-day') ||
+        dn.includes('7 day')
+      );
+    };
 
-    if (match) return match;
+    const isFiveHourBucket = (b: QuotaBucket): boolean => {
+      const win = (b.window || '').toLowerCase();
+      const id = (b.bucketId || '').toLowerCase();
+      const dn = (b.displayName || '').toLowerCase();
+      return (
+        win === '5h' ||
+        win === '5-hour' ||
+        win === 'rolling' ||
+        win === 'hourly' ||
+        win === 'session' ||
+        id.includes('5h') ||
+        id.includes('5-hour') ||
+        id.includes('rolling') ||
+        id.includes('hourly') ||
+        id.includes('session') ||
+        dn.includes('5-hour') ||
+        dn.includes('five hour') ||
+        dn.includes('5 hour') ||
+        dn.includes('rolling') ||
+        dn.includes('hourly') ||
+        dn.includes('session')
+      );
+    };
 
-    // Fallback for single-bucket groups that don't explicitly state '5h'
-    if (window === 'weekly' && group.buckets.length === 1) {
-      return group.buckets[0];
+    if (window === '5h') {
+      const explicit5h = group.buckets.find(isFiveHourBucket);
+      if (explicit5h) return explicit5h;
+
+      // If multiple buckets exist and one is weekly, the non-weekly bucket is the 5-hour rolling limit
+      if (group.buckets.length >= 2) {
+        const nonWeekly = group.buckets.find((b) => !isWeeklyBucket(b));
+        if (nonWeekly) return nonWeekly;
+      }
+
+      // If single bucket and it is NOT weekly (e.g. Free/Plus single rolling bucket), treat as 5h
+      if (group.buckets.length === 1 && !isWeeklyBucket(group.buckets[0])) {
+        return group.buckets[0];
+      }
+
+      return undefined;
+    } else {
+      const explicitWeekly = group.buckets.find(isWeeklyBucket);
+      if (explicitWeekly) return explicitWeekly;
+
+      // If multiple buckets exist and one is 5h, the non-5h bucket is weekly
+      if (group.buckets.length >= 2) {
+        const non5h = group.buckets.find((b) => !isFiveHourBucket(b));
+        if (non5h) return non5h;
+      }
+
+      return undefined;
     }
-
-    return undefined;
   }
 
   /**
-   * Computes the effective remaining fraction and text for a model group.
-   * - 'effective': uses the bottleneck (lowest) remaining fraction across all buckets in the group.
-   * - 'fiveHourPreferred': uses the 5h bucket when available, or falls back to weekly for weekly-only groups (e.g. Gemini 4 Argon).
+   * Computes the remaining fraction and text for a model group.
+   * Defaults to 'fiveHourPreferred' so the Status Bar always shows the active 5-hour rolling limit
+   * (unless weekly limit is 0% exhausted or the model is weekly-only like Gemini 4 Argon).
    */
   public static getGroupEffectiveQuota(
     group: QuotaGroup,
-    mode: 'effective' | 'fiveHourPreferred' = 'effective'
+    mode: 'effective' | 'fiveHourPreferred' = 'fiveHourPreferred'
   ): {
     fraction: number;
     pct: string;
@@ -950,7 +1001,18 @@ export class QuotaService extends EventEmitter {
       if (lower.includes('enterprise') || lower.includes('business') || lower.includes('team')) {
         return 'enterprise';
       }
-      if (lower.includes('pro')) return 'pro';
+      if (lower.includes('plus')) return 'plus';
+      if (
+        lower.includes('pro') ||
+        lower.includes('student') ||
+        lower.includes('edu') ||
+        lower.includes('campus') ||
+        lower.includes('sheerid') ||
+        lower.includes('discount') ||
+        lower.includes('advanced')
+      ) {
+        return 'pro';
+      }
       if (lower.includes('free')) return 'free';
     }
 
@@ -963,6 +1025,43 @@ export class QuotaService extends EventEmitter {
     }
 
     return 'unknown';
+  }
+
+  /**
+   * Returns a clean, unified plan label for UI display.
+   * Student, education, or discounted Pro variants are unified as "PRO" (never displays a Student banner).
+   * Google AI Plus is displayed as "PLUS".
+   */
+  public static getNormalizedPlanLabel(accountTier?: AccountTier, rawPlanName?: string): string {
+    const tier =
+      accountTier && accountTier !== 'unknown'
+        ? accountTier
+        : QuotaService.detectAccountTier(rawPlanName);
+
+    switch (tier) {
+      case 'ultra':
+        return 'ULTRA';
+      case 'enterprise':
+        return 'ENTERPRISE';
+      case 'pro':
+        return 'PRO';
+      case 'plus':
+        return 'PLUS';
+      case 'free':
+        return 'FREE';
+      default: {
+        if (!rawPlanName) return '';
+        const cleaned = rawPlanName
+          .replace(
+            /\b(student|students|education|edu|discount|discounted|trial|campus|sheerid)\b/gi,
+            ''
+          )
+          .replace(/[()[\]\-_]+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        return cleaned ? cleaned.toUpperCase() : 'PRO';
+      }
+    }
   }
 
   /**

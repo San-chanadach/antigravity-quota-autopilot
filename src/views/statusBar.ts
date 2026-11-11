@@ -97,14 +97,12 @@ export class StatusBarManager implements vscode.Disposable {
   }
 
   private formatQuotaSegments(groups: QuotaGroup[], format: string): string {
-    const calcMode = format === 'fiveHourOnly' ? 'fiveHourPreferred' : 'effective';
-
     if (format === 'compact' || format === 'smartLowest') {
       let lowestGroup = groups[0];
-      let lowestInfo = QuotaService.getGroupEffectiveQuota(groups[0], 'effective');
+      let lowestInfo = QuotaService.getGroupEffectiveQuota(groups[0], 'fiveHourPreferred');
 
       for (let i = 1; i < groups.length; i++) {
-        const info = QuotaService.getGroupEffectiveQuota(groups[i], 'effective');
+        const info = QuotaService.getGroupEffectiveQuota(groups[i], 'fiveHourPreferred');
         if (info.fraction < lowestInfo.fraction) {
           lowestInfo = info;
           lowestGroup = groups[i];
@@ -133,7 +131,7 @@ export class StatusBarManager implements vscode.Disposable {
 
     const segments = targetGroups.map((group) => {
       const label = QuotaService.getShortGroupLabel(group);
-      const info = QuotaService.getGroupEffectiveQuota(group, calcMode);
+      const info = QuotaService.getGroupEffectiveQuota(group, 'fiveHourPreferred');
       return `${label}: ${info.pct}`;
     });
 
@@ -167,11 +165,11 @@ export class StatusBarManager implements vscode.Disposable {
     md.supportThemeIcons = false;
 
     const autopilot = this.autopilotService.getConfig();
-    const planBadge = this.lastQuota?.planName
-      ? ` · \`${this.lastQuota.planName}\``
-      : this.lastQuota?.accountTier && this.lastQuota.accountTier !== 'unknown'
-      ? ` · \`${this.lastQuota.accountTier.toUpperCase()}\``
-      : '';
+    const cleanTier = QuotaService.getNormalizedPlanLabel(
+      this.lastQuota?.accountTier,
+      this.lastQuota?.planName
+    );
+    const planBadge = cleanTier ? ` · \`${cleanTier}\`` : '';
 
     md.appendMarkdown(`**Antigravity Quota & Autopilot**${planBadge}\n\n`);
 
@@ -179,16 +177,18 @@ export class StatusBarManager implements vscode.Disposable {
       md.appendMarkdown(`Account: \`${this.lastQuota.userEmail}\`\n\n`);
     }
 
-    // === SECTION 1: MINIMALIST QUOTA TABLE ===
+    // === SECTION 1: MINIMALIST QUOTA TABLE (SEPARATED 5-HOUR & WEEKLY COLUMNS) ===
     if (errorMessage && (!this.lastQuota || this.lastQuota.groups.length === 0)) {
       md.appendMarkdown(`🔴 Offline: ${errorMessage}\n\n`);
     } else if (this.lastQuota && this.lastQuota.groups.length > 0) {
-      md.appendMarkdown(`| Model Group | Remaining | Reset |\n`);
+      md.appendMarkdown(`| Model Group | 5-Hour Limit | Weekly Limit |\n`);
       md.appendMarkdown(`| :--- | :--- | :--- |\n`);
 
       for (const group of this.lastQuota.groups) {
         const row = this.formatTooltipGroupRow(group);
-        md.appendMarkdown(`| ${row.dot} ${group.displayName} | ${row.remaining} | ${row.reset} |\n`);
+        md.appendMarkdown(
+          `| ${row.dot} ${group.displayName} | ${row.fiveHourCol} | ${row.weeklyCol} |\n`
+        );
       }
       md.appendMarkdown(`\n`);
     } else {
@@ -231,10 +231,18 @@ export class StatusBarManager implements vscode.Disposable {
     const todaySummary = this.taskSessionService.getTodaySummary();
     const metaParts: string[] = [];
     if (todaySummary.logCountToday > 0) {
-      metaParts.push(`Used today: \`-${todaySummary.totalUsedTodayPct}%\` (${todaySummary.logCountToday} turns)`);
+      metaParts.push(
+        `Used today (5h): \`-${todaySummary.totalUsedTodayPct}%\` (${todaySummary.logCountToday} turns)`
+      );
     }
     if (this.lastQuota) {
-      metaParts.push(`Synced ${this.lastQuota.lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`);
+      metaParts.push(
+        `Synced ${this.lastQuota.lastUpdated.toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })}`
+      );
     }
     if (metaParts.length > 0) {
       md.appendMarkdown(`${metaParts.join(' · ')}\n\n`);
@@ -253,70 +261,42 @@ export class StatusBarManager implements vscode.Disposable {
 
   private formatTooltipGroupRow(group: QuotaGroup): {
     dot: string;
-    remaining: string;
-    reset: string;
+    fiveHourCol: string;
+    weeklyCol: string;
   } {
-    const info = QuotaService.getGroupEffectiveQuota(group, 'effective');
+    const info = QuotaService.getGroupEffectiveQuota(group, 'fiveHourPreferred');
     const dot = this.getStatusDot(info.fraction);
 
     if (info.weeklyBucket && info.weeklyBucket.remainingFraction <= 0) {
-      const reset = QuotaService.formatTimeUntilReset(info.weeklyBucket.resetTime) || '—';
+      const wReset = QuotaService.formatTimeUntilReset(info.weeklyBucket.resetTime);
       return {
         dot: '🔴',
-        remaining: '**0%** (Weekly limit)',
-        reset,
+        fiveHourCol: '**0%** (Blocked)',
+        weeklyCol: `**0%**${wReset ? ` (${wReset})` : ''}`,
       };
     }
 
-    if (info.fiveHourBucket && info.weeklyBucket) {
+    let fiveHourCol = '—';
+    if (info.fiveHourBucket) {
       const hFrac = info.fiveHourBucket.disabled ? 0 : info.fiveHourBucket.remainingFraction;
-      const wFrac = info.weeklyBucket.disabled ? 0 : info.weeklyBucket.remainingFraction;
       const hPct = QuotaService.formatPercentage(hFrac);
+      const hReset = QuotaService.formatTimeUntilReset(info.fiveHourBucket.resetTime);
+      fiveHourCol = `**${hPct}**${hReset ? ` (${hReset})` : ''}`;
+    }
+
+    let weeklyCol = '—';
+    if (info.weeklyBucket) {
+      const wFrac = info.weeklyBucket.disabled ? 0 : info.weeklyBucket.remainingFraction;
       const wPct = QuotaService.formatPercentage(wFrac);
-
-      if (hFrac < wFrac) {
-        const reset =
-          QuotaService.formatTimeUntilReset(info.fiveHourBucket.resetTime || info.weeklyBucket.resetTime) ||
-          '—';
-        return {
-          dot,
-          remaining: `**${hPct}** (W: ${wPct})`,
-          reset,
-        };
-      } else {
-        const reset =
-          QuotaService.formatTimeUntilReset(info.weeklyBucket.resetTime || info.fiveHourBucket.resetTime) ||
-          '—';
-        return {
-          dot,
-          remaining: `**${wPct}** (5h: ${hPct})`,
-          reset,
-        };
-      }
+      const wReset = QuotaService.formatTimeUntilReset(info.weeklyBucket.resetTime);
+      const formattedPct = info.isWeeklyOnly ? `**${wPct}**` : wPct;
+      weeklyCol = `${formattedPct}${wReset ? ` (${wReset})` : ''}`;
     }
 
-    if (group.buckets.length === 1) {
-      const b = group.buckets[0];
-      const frac = b.disabled ? 0 : b.remainingFraction;
-      const pct = QuotaService.formatPercentage(frac);
-      const is5h = b.window === '5h' || (b.bucketId || '').toLowerCase().includes('5h');
-      const winLabel = is5h ? '5h' : 'Weekly';
-      const reset = QuotaService.formatTimeUntilReset(b.resetTime) || '—';
-      return {
-        dot: this.getStatusDot(frac),
-        remaining: `**${pct}** (${winLabel})`,
-        reset,
-      };
-    }
-
-    const combined = group.buckets
-      .map((b) => QuotaService.formatPercentage(b.disabled ? 0 : b.remainingFraction))
-      .join(' / ');
-    const firstReset = group.buckets.find((b) => b.resetTime)?.resetTime;
     return {
       dot,
-      remaining: `**${combined}**`,
-      reset: QuotaService.formatTimeUntilReset(firstReset) || '—',
+      fiveHourCol,
+      weeklyCol,
     };
   }
 

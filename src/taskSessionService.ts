@@ -176,11 +176,17 @@ export class TaskSessionService extends EventEmitter {
     const newEntries: ActivityLogEntry[] = [];
     const currentSnapshots: { [bucketId: string]: number } = {};
     const promptTitle = this.getLatestPromptTitle();
+    const nowIso = new Date().toISOString();
 
     for (const group of quota.groups) {
+      const fiveHourBucket = QuotaService.findBucket(group, '5h');
+      const weeklyBucket = QuotaService.findBucket(group, 'weekly');
+
+      let fiveHourDelta = 0;
+      let weeklyDelta = 0;
+
       for (const bucket of group.buckets) {
         if (typeof bucket.remainingFraction !== 'number') continue;
-
         const bucketId = bucket.bucketId;
         const currentFrac = bucket.remainingFraction;
         currentSnapshots[bucketId] = currentFrac;
@@ -188,29 +194,68 @@ export class TaskSessionService extends EventEmitter {
         const prevFrac = this.previousSnapshots[bucketId];
         if (typeof prevFrac === 'number') {
           const delta = prevFrac - currentFrac;
-          // Trigger when delta >= 0.0001 (0.01%) - captures all AI turns
           if (delta >= 0.0001) {
-            const inferredWindow =
-              bucket.window ||
-              (bucket.bucketId.toLowerCase().includes('weekly') ||
-              bucket.displayName.toLowerCase().includes('weekly')
-                ? 'weekly'
-                : '5h');
-            const entry: ActivityLogEntry = {
-              id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
-              timestamp: new Date().toISOString(),
-              promptTitle,
-              groupName: group.displayName,
-              bucketDisplayName: bucket.displayName,
-              window: inferredWindow,
-              usedDeltaFraction: delta,
-              usedPct: Math.round(delta * 1000) / 10,
-              remainingFraction: currentFrac,
-              remainingPct: Math.round(currentFrac * 1000) / 10,
-            };
-            newEntries.push(entry);
+            if (fiveHourBucket && bucket.bucketId === fiveHourBucket.bucketId) {
+              fiveHourDelta = delta;
+            } else if (weeklyBucket && bucket.bucketId === weeklyBucket.bucketId) {
+              weeklyDelta = delta;
+            } else {
+              const isWeekly =
+                bucket.window === 'weekly' ||
+                (bucket.bucketId || '').toLowerCase().includes('weekly') ||
+                (bucket.displayName || '').toLowerCase().includes('weekly');
+              if (isWeekly) {
+                weeklyDelta = delta;
+              } else {
+                fiveHourDelta = delta;
+              }
+            }
           }
         }
+      }
+
+      // Create a single unified turn record if either 5-hour or weekly quota was consumed
+      if (fiveHourDelta >= 0.0001 || weeklyDelta >= 0.0001) {
+        const has5h = fiveHourDelta >= 0.0001 && !!fiveHourBucket;
+        const primaryWindow = has5h ? '5h' : 'weekly';
+        const primaryDelta = has5h ? fiveHourDelta : weeklyDelta;
+        const primaryBucket = has5h ? fiveHourBucket! : (weeklyBucket || group.buckets[0]);
+        const primaryRemFrac =
+          typeof primaryBucket?.remainingFraction === 'number'
+            ? primaryBucket.remainingFraction
+            : 1.0;
+
+        const fiveHourUsedPct =
+          fiveHourDelta >= 0.0001 ? Math.round(fiveHourDelta * 1000) / 10 : undefined;
+        const fiveHourRemainingPct =
+          fiveHourBucket && typeof fiveHourBucket.remainingFraction === 'number'
+            ? Math.round(fiveHourBucket.remainingFraction * 1000) / 10
+            : undefined;
+
+        const weeklyUsedPct =
+          weeklyDelta >= 0.0001 ? Math.round(weeklyDelta * 1000) / 10 : undefined;
+        const weeklyRemainingPct =
+          weeklyBucket && typeof weeklyBucket.remainingFraction === 'number'
+            ? Math.round(weeklyBucket.remainingFraction * 1000) / 10
+            : undefined;
+
+        const entry: ActivityLogEntry = {
+          id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+          timestamp: nowIso,
+          promptTitle,
+          groupName: group.displayName,
+          bucketDisplayName: primaryBucket?.displayName || 'Quota Limit',
+          window: primaryWindow,
+          usedDeltaFraction: primaryDelta,
+          usedPct: Math.round(primaryDelta * 1000) / 10,
+          remainingFraction: primaryRemFrac,
+          remainingPct: Math.round(primaryRemFrac * 1000) / 10,
+          fiveHourUsedPct,
+          fiveHourRemainingPct,
+          weeklyUsedPct,
+          weeklyRemainingPct,
+        };
+        newEntries.push(entry);
       }
     }
 
@@ -223,8 +268,83 @@ export class TaskSessionService extends EventEmitter {
     }
   }
 
+  /**
+   * Normalizes and merges legacy split records (where a single turn produced two separate entries
+   * for 5h and weekly at the same timestamp) into unified turn entries.
+   */
+  private normalizeHistoryEntries(raw: ActivityLogEntry[]): ActivityLogEntry[] {
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+
+    const merged: ActivityLogEntry[] = [];
+    let i = 0;
+
+    while (i < raw.length) {
+      const curr = { ...raw[i] };
+
+      // Ensure unified fields are populated on legacy single entries
+      if (curr.fiveHourUsedPct === undefined && curr.weeklyUsedPct === undefined) {
+        if (curr.window === 'weekly') {
+          curr.weeklyUsedPct = curr.usedPct;
+          curr.weeklyRemainingPct = curr.remainingPct;
+        } else {
+          curr.fiveHourUsedPct = curr.usedPct;
+          curr.fiveHourRemainingPct = curr.remainingPct;
+        }
+      }
+
+      // Check if next item is a split companion from the same turn (same group, opposite window, within 3s)
+      if (i + 1 < raw.length) {
+        const next = raw[i + 1];
+        const t1 = new Date(curr.timestamp).getTime();
+        const t2 = new Date(next.timestamp).getTime();
+        const timeDiff = Math.abs(t1 - t2);
+
+        const isOppositeWindow =
+          (curr.window === '5h' && next.window === 'weekly') ||
+          (curr.window === 'weekly' && next.window === '5h');
+
+        if (
+          curr.groupName === next.groupName &&
+          isOppositeWindow &&
+          timeDiff <= 3000 &&
+          next.fiveHourUsedPct === undefined &&
+          next.weeklyUsedPct === undefined
+        ) {
+          const fiveItem = curr.window === '5h' ? curr : next;
+          const weekItem = curr.window === 'weekly' ? curr : next;
+
+          const unified: ActivityLogEntry = {
+            id: fiveItem.id,
+            timestamp: fiveItem.timestamp,
+            promptTitle: fiveItem.promptTitle || weekItem.promptTitle,
+            groupName: fiveItem.groupName,
+            bucketDisplayName: fiveItem.bucketDisplayName,
+            window: '5h',
+            usedDeltaFraction: fiveItem.usedDeltaFraction,
+            usedPct: fiveItem.usedPct,
+            remainingFraction: fiveItem.remainingFraction,
+            remainingPct: fiveItem.remainingPct,
+            fiveHourUsedPct: fiveItem.usedPct,
+            fiveHourRemainingPct: fiveItem.remainingPct,
+            weeklyUsedPct: weekItem.usedPct,
+            weeklyRemainingPct: weekItem.remainingPct,
+          };
+          merged.push(unified);
+          i += 2;
+          continue;
+        }
+      }
+
+      merged.push(curr);
+      i++;
+    }
+
+    return merged;
+  }
+
   public getHistory(): ActivityLogEntry[] {
-    return this.globalState.get<ActivityLogEntry[]>(this.HISTORY_KEY, []);
+    const raw = this.globalState.get<ActivityLogEntry[]>(this.HISTORY_KEY, []);
+    return this.normalizeHistoryEntries(raw);
   }
 
   private async saveEntriesToHistory(entries: ActivityLogEntry[]): Promise<void> {
@@ -241,7 +361,11 @@ export class TaskSessionService extends EventEmitter {
     this.emit('historyCleared', []);
   }
 
-  public getTodaySummary(): { totalUsedTodayPct: number; logCountToday: number; latestEntry: ActivityLogEntry | null } {
+  public getTodaySummary(): {
+    totalUsedTodayPct: number;
+    logCountToday: number;
+    latestEntry: ActivityLogEntry | null;
+  } {
     const history = this.getHistory();
     const today = new Date().toDateString();
     let totalUsedTodayPct = 0;
@@ -249,7 +373,12 @@ export class TaskSessionService extends EventEmitter {
 
     for (const entry of history) {
       if (new Date(entry.timestamp).toDateString() === today) {
-        totalUsedTodayPct += entry.usedPct;
+        // Count only primary turn delta (5-Hour when available, or Weekly for weekly-only models)
+        const primaryDelta =
+          typeof entry.fiveHourUsedPct === 'number'
+            ? entry.fiveHourUsedPct
+            : entry.usedPct;
+        totalUsedTodayPct += primaryDelta;
         logCountToday++;
       }
     }

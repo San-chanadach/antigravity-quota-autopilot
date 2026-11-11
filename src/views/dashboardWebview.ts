@@ -228,7 +228,9 @@ export class DashboardWebviewPanel {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Antigravity Quota & Autopilot</title>
   <style>
-    :root {
+    :root,
+    body.vscode-dark,
+    body.vscode-high-contrast {
       --bg-primary: #111316;
       --bg-card: #181b20;
       --bg-card-hover: #1e2228;
@@ -241,8 +243,54 @@ export class DashboardWebviewPanel {
       --accent-yellow: #d29922;
       --accent-red: #f85149;
       --accent-blue: #58a6ff;
+      --pill-5h-bg: rgba(248, 81, 73, 0.12);
+      --pill-5h-text: #ff7b72;
+      --pill-5h-border: rgba(248, 81, 73, 0.28);
+      --pill-weekly-bg: rgba(88, 166, 255, 0.1);
+      --pill-weekly-text: #79c0ff;
+      --pill-weekly-border: rgba(88, 166, 255, 0.25);
+      --turbo-active-bg: rgba(63, 185, 80, 0.12);
+      --turbo-active-hover: rgba(63, 185, 80, 0.18);
+      --turbo-active-border: rgba(63, 185, 80, 0.55);
+      --error-bg: rgba(248, 81, 73, 0.1);
+      --error-border: rgba(248, 81, 73, 0.3);
+      --error-text: #ff7b72;
+      --gauge-track: #262b33;
+      --gauge-empty: #484f58;
+      --seg-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
       --radius: 10px;
       --transition: all 0.18s ease;
+    }
+
+    body.vscode-light,
+    body.vscode-high-contrast-light {
+      --bg-primary: #f6f8fa;
+      --bg-card: #ffffff;
+      --bg-card-hover: #f3f4f6;
+      --bg-control: #eaeef2;
+      --border-color: #d0d7de;
+      --border-strong: #afb8c1;
+      --text-main: #1f2328;
+      --text-muted: #59636e;
+      --accent-green: #1a7f37;
+      --accent-yellow: #9a6700;
+      --accent-red: #cf222e;
+      --accent-blue: #0969da;
+      --pill-5h-bg: rgba(207, 34, 46, 0.08);
+      --pill-5h-text: #cf222e;
+      --pill-5h-border: rgba(207, 34, 46, 0.25);
+      --pill-weekly-bg: rgba(9, 105, 218, 0.08);
+      --pill-weekly-text: #0969da;
+      --pill-weekly-border: rgba(9, 105, 218, 0.22);
+      --turbo-active-bg: rgba(26, 127, 55, 0.1);
+      --turbo-active-hover: rgba(26, 127, 55, 0.16);
+      --turbo-active-border: rgba(26, 127, 55, 0.45);
+      --error-bg: rgba(207, 34, 46, 0.08);
+      --error-border: rgba(207, 34, 46, 0.25);
+      --error-text: #cf222e;
+      --gauge-track: #e1e4e8;
+      --gauge-empty: #8c959f;
+      --seg-shadow: 0 1px 2px rgba(31, 35, 40, 0.12);
     }
 
     * {
@@ -253,8 +301,8 @@ export class DashboardWebviewPanel {
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
-      background-color: var(--vscode-editor-background, var(--bg-primary));
-      color: var(--vscode-editor-foreground, var(--text-main));
+      background-color: var(--bg-primary);
+      color: var(--text-main);
       padding: 28px 32px;
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
@@ -392,8 +440,8 @@ export class DashboardWebviewPanel {
     }
 
     .turbo-toggle-btn.active {
-      border-color: rgba(63, 185, 80, 0.55);
-      background: rgba(63, 185, 80, 0.12);
+      border-color: var(--turbo-active-border);
+      background: var(--turbo-active-bg);
       color: var(--accent-green);
     }
 
@@ -403,7 +451,7 @@ export class DashboardWebviewPanel {
     }
 
     .turbo-toggle-btn.active:hover {
-      background: rgba(63, 185, 80, 0.18);
+      background: var(--turbo-active-hover);
       color: var(--accent-green);
     }
 
@@ -453,22 +501,22 @@ export class DashboardWebviewPanel {
     }
 
     .seg-btn.selected {
-      background: var(--bg-card-hover);
+      background: var(--bg-card);
       color: var(--text-main);
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+      box-shadow: var(--seg-shadow);
     }
 
     .seg-btn.selected.turbo-pill {
       color: var(--accent-green);
-      background: rgba(63, 185, 80, 0.12);
+      background: var(--turbo-active-bg);
     }
 
     /* Error Banner */
     .error-banner {
       display: none;
-      background: rgba(248, 81, 73, 0.1);
-      border: 1px solid rgba(248, 81, 73, 0.3);
-      color: #ff7b72;
+      background: var(--error-bg);
+      border: 1px solid var(--error-border);
+      color: var(--error-text);
       padding: 10px 14px;
       border-radius: var(--radius);
       margin-bottom: 20px;
@@ -579,7 +627,7 @@ export class DashboardWebviewPanel {
 
     .gauge-bg {
       fill: none;
-      stroke: #262b33;
+      stroke: var(--gauge-track);
       stroke-width: 3.5;
     }
 
@@ -630,21 +678,22 @@ export class DashboardWebviewPanel {
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: 8px;
-      padding: 10px 14px;
-      margin-bottom: 6px;
+      padding: 11px 15px;
+      margin-bottom: 7px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 12.5px;
       gap: 16px;
+      flex-wrap: wrap;
     }
 
     .history-item-left {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 3px;
       flex: 1;
-      min-width: 0;
+      min-width: 200px;
     }
 
     .history-prompt-title {
@@ -666,25 +715,51 @@ export class DashboardWebviewPanel {
     .history-item-stats {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       flex-shrink: 0;
+      flex-wrap: wrap;
     }
 
-    .history-pill {
+    .quota-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 6px;
       font-size: 11.5px;
+      font-variant-numeric: tabular-nums;
+      border: 1px solid transparent;
+    }
+
+    .quota-badge.badge-5h {
+      background: var(--pill-5h-bg);
+      border-color: var(--pill-5h-border);
+      color: var(--pill-5h-text);
+    }
+
+    .quota-badge.badge-weekly {
+      background: var(--pill-weekly-bg);
+      border-color: var(--pill-weekly-border);
+      color: var(--pill-weekly-text);
+    }
+
+    .badge-window {
       font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 5px;
-      background: rgba(248, 81, 73, 0.1);
-      color: #ff7b72;
-      border: 1px solid rgba(248, 81, 73, 0.25);
-      font-variant-numeric: tabular-nums;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      opacity: 0.9;
     }
 
-    .history-remaining {
-      font-size: 11.5px;
+    .badge-delta {
+      font-weight: 700;
+    }
+
+    .badge-rem {
+      font-size: 11px;
       color: var(--text-muted);
-      font-variant-numeric: tabular-nums;
+      padding-left: 4px;
+      border-left: 1px solid var(--border-color);
     }
 
     .pagination-bar {
@@ -768,7 +843,7 @@ export class DashboardWebviewPanel {
     <div id="historyArea"></div>
 
     <div class="info-footer">
-      Quota is tracked dynamically across all model groups available on your account tier (Free, Google AI Pro, Ultra, or Enterprise).
+      Quota is tracked dynamically across all model groups available on your account tier (Free, Plus, Pro, Ultra, or Enterprise).
     </div>
   </div>
 
@@ -881,7 +956,7 @@ export class DashboardWebviewPanel {
     }
 
     function getColorForFraction(f) {
-      if (f <= 0) return '#484f58';
+      if (f <= 0) return 'var(--gauge-empty)';
       if (f > 0.35) return 'var(--accent-green)';
       if (f > 0.15) return 'var(--accent-yellow)';
       return 'var(--accent-red)';
@@ -1008,33 +1083,58 @@ export class DashboardWebviewPanel {
         const d = new Date(item.timestamp);
         const dateStr = d.toLocaleDateString();
         const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const pctUsed = item.usedPct.toFixed(1);
-        const remPct = item.remainingPct.toFixed(1);
         const promptDisplay = item.promptTitle
           ? escapeHtml(item.promptTitle)
-          : escapeHtml(item.groupName + ' · ' + item.bucketDisplayName);
+          : escapeHtml(item.groupName);
+
+        const has5h = typeof item.fiveHourUsedPct === 'number' || (item.window === '5h' && typeof item.usedPct === 'number');
+        const hasWeekly = typeof item.weeklyUsedPct === 'number' || (item.window === 'weekly' && typeof item.usedPct === 'number');
+
+        let badgesHtml = '';
+        if (has5h) {
+          const hUsed = (typeof item.fiveHourUsedPct === 'number' ? item.fiveHourUsedPct : item.usedPct).toFixed(1);
+          const hRem = (typeof item.fiveHourRemainingPct === 'number' ? item.fiveHourRemainingPct : item.remainingPct).toFixed(1);
+          badgesHtml += \`
+            <div class="quota-badge badge-5h" title="5-Hour Rolling Quota">
+              <span class="badge-window">5h</span>
+              <span class="badge-delta">-\${hUsed}%</span>
+              <span class="badge-rem">\${hRem}% left</span>
+            </div>
+          \`;
+        }
+
+        if (hasWeekly) {
+          const wUsed = (typeof item.weeklyUsedPct === 'number' ? item.weeklyUsedPct : item.usedPct).toFixed(1);
+          const wRem = (typeof item.weeklyRemainingPct === 'number' ? item.weeklyRemainingPct : item.remainingPct).toFixed(1);
+          badgesHtml += \`
+            <div class="quota-badge badge-weekly" title="Weekly Quota Pool">
+              <span class="badge-window">Weekly</span>
+              <span class="badge-delta">-\${wUsed}%</span>
+              <span class="badge-rem">\${wRem}% left</span>
+            </div>
+          \`;
+        }
 
         itemsHtml += \`
           <div class="history-card">
             <div class="history-item-left">
               <div class="history-prompt-title" title="\${escapeHtml(item.promptTitle || '')}">\${promptDisplay}</div>
               <div class="history-item-meta">
-                <span>\${escapeHtml(item.groupName)} · \${escapeHtml(item.bucketDisplayName)}</span>
+                <span>\${escapeHtml(item.groupName)}</span>
                 <span>·</span>
                 <span>\${dateStr} \${timeStr}</span>
               </div>
             </div>
             <div class="history-item-stats">
-              <span class="history-remaining">\${remPct}% left</span>
-              <span class="history-pill">-\${pctUsed}%</span>
+              \${badgesHtml}
             </div>
           </div>
         \`;
       }
 
       const todayStats = summary && summary.logCountToday > 0
-        ? \`Today: -\${summary.totalUsedTodayPct}% (\${summary.logCountToday} turns)\`
-        : \`\${totalItems} records\`;
+        ? \`Today (5h): -\${summary.totalUsedTodayPct}% (\${summary.logCountToday} turns)\`
+        : \`\${totalItems} turns\`;
 
       const prevDisabled = currentPage <= 1 ? 'disabled' : '';
       const nextDisabled = currentPage >= totalPages ? 'disabled' : '';

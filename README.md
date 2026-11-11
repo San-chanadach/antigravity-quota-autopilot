@@ -1,12 +1,12 @@
 # Antigravity AI Quota & Auto-Accept Autopilot
 
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.1-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.2-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
 [![Author: San Chanadach](https://img.shields.io/badge/Author-San%20Chanadach-blue.svg)](https://github.com/San-chanadach)
 [![Ko-fi: Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-ff5e5b?style=flat&logo=ko-fi)](https://ko-fi.com/sanchanadach)
 [![Antigravity IDE: v2.6.0+](https://img.shields.io/badge/Antigravity%20IDE-v2.6.0%2B-purple.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)** — featuring **1-Click Native Turbo Autopilot**, instant **Global Permissions & Plan Review Policy** controls (`Ctrl+Alt+A`), dynamic **Multi-Model AI Quota Tracking** across **Free / Pro / Ultra** accounts (including **Gemini 4 Argon**), and an automated **1,000-Turn Activity Logger**.
+A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)** — featuring **1-Click Native Turbo Autopilot**, instant **Global Permissions & Plan Review Policy** controls (`Ctrl+Alt+A`), dynamic **Multi-Model AI Quota Tracking** across **Free / Plus / Pro / Ultra** accounts (including **Gemini 4 Argon**), and an automated **1,000-Turn Activity Logger**.
 
 ---
 
@@ -15,6 +15,24 @@ A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)*
   <br />
   <em>Minimalist Status Bar &amp; Hover Controls: View real-time multi-model quotas (Gemini, Claude/GPT, Argon) and switch Global Permissions or Plan Review Policy in 1 click.</em>
 </p>
+
+---
+
+## What's New in v1.2.2
+
+- **Active 5-Hour Limit Priority on Status Bar**:
+  - Always prioritizes the active 5-hour rolling limit and reset countdown on the Status Bar across all model groups (Gemini Flash/Pro, Claude/GPT).
+  - Resolves the bug where student, discounted, or multi-day active accounts displayed an unchanging Weekly percentage instead of their replenished 5-hour quota.
+  - Transparently displays both **5-Hour Limit** and **Weekly Limit** side-by-side in separate columns within the Hover Tooltip.
+- **Google AI Plus Tier & Unified PRO Normalization**:
+  - Full support for the new Google AI **`Plus`** tier alongside Free, Pro, Ultra, and Enterprise.
+  - Automatically normalizes all student, education, and promotional plans to **`PRO`** identically across the Dashboard, Hover Tooltip, and Sidebar without any student labels.
+- **Redesigned Activity Log (Unified Turn Records)**:
+  - Consolidates 5-Hour rolling consumption and Weekly pool deductions into a single unified card per prompt turn.
+  - Eliminates confusion with apparent "double deductions" and accurately tracks daily turns and primary 5-hour usage in the Today summary.
+- **Complete Light Mode (Theme) Fix**:
+  - Added dedicated high-contrast CSS tokens for `body.vscode-light`, ensuring clear, crisp, and comfortable text readability on light backgrounds.
+  - 100% preserves the existing dark mode design and strict minimalist aesthetic (`🟢`, `🟡`, `🔴`).
 
 ---
 
@@ -100,7 +118,7 @@ Adapts automatically to whatever plan and model groups your account has:
 3. Click **Install**.
 
 ### Method 2: Install from `.vsix` Release
-1. Download `antigravity-quota-autopilot-1.2.1.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
+1. Download `antigravity-quota-autopilot-1.2.2.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
 2. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) -> **Extensions: Install from VSIX...**.
 3. Select the `.vsix` file and reload the window.
 

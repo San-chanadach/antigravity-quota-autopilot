@@ -24,7 +24,7 @@ export class QuotaTreeItem extends vscode.TreeItem {
       };
     } else if (itemType === 'group' && group) {
       this.contextValue = 'quotaGroup';
-      const info = QuotaService.getGroupEffectiveQuota(group, 'effective');
+      const info = QuotaService.getGroupEffectiveQuota(group, 'fiveHourPreferred');
       this.description = info.pct;
       this.tooltip = group.description || group.displayName;
     } else if (itemType === 'bucket' && bucket) {
@@ -198,6 +198,7 @@ export class QuotaTreeDataProvider implements vscode.TreeDataProvider<QuotaTreeI
       );
 
       if (quota.userEmail) {
+        const cleanPlan = QuotaService.getNormalizedPlanLabel(quota.accountTier, quota.planName);
         items.push(
           new QuotaTreeItem(
             'Account',
@@ -205,7 +206,7 @@ export class QuotaTreeDataProvider implements vscode.TreeDataProvider<QuotaTreeI
             'info',
             undefined,
             undefined,
-            `${quota.userEmail}${quota.planName ? ' (' + quota.planName + ')' : ''}`
+            `${quota.userEmail}${cleanPlan ? ' (' + cleanPlan + ')' : ''}`
           )
         );
       }
