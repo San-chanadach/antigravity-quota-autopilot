@@ -1,6 +1,8 @@
+import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
 import * as os from 'os';
+import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { EventEmitter } from 'events';
@@ -21,11 +23,22 @@ interface CandidateProcess {
   pid: string;
   csrfToken: string;
   ports: number[];
+  httpPort?: number;
+  httpsPort?: number;
   isIde: boolean;
   isWorkspaceMatch: boolean;
+  isHubSubclient?: boolean;
   useHttp: boolean;
   numPid: number;
   createTime?: number;
+  source?: 'daemon_file' | 'process_scan' | 'settings';
+}
+
+interface UserStatusResult {
+  name?: string;
+  email?: string;
+  planName?: string;
+  rawUserStatus?: any;
 }
 
 export class QuotaService extends EventEmitter {
@@ -134,16 +147,21 @@ export class QuotaService extends EventEmitter {
     excludePid: string
   ): Promise<void> {
     try {
-      const candidates = await this.findCandidateProcesses();
-      for (const c of candidates) {
-        if (c.pid === excludePid || c.ports.length === 0) continue;
-        const port = c.ports[0];
+      const daemonCandidates = this.findDaemonFileCandidates();
+      const procCandidates = daemonCandidates.length > 0 ? [] : await this.findCandidateProcesses();
+      const all = [...daemonCandidates, ...procCandidates];
+      const seenPids = new Set<string>([excludePid]);
+      for (const c of all) {
+        if (seenPids.has(c.pid) || c.ports.length === 0) continue;
+        seenPids.add(c.pid);
+        const port = c.httpPort || c.ports[0];
+        const useHttp = c.httpPort ? true : c.useHttp;
         await this.postJetboxWriteStateToEndpoint(
           port,
           c.csrfToken,
           userSettingsPatch,
           1200,
-          c.useHttp
+          useHttp
         );
       }
     } catch {}
@@ -242,51 +260,41 @@ export class QuotaService extends EventEmitter {
       if (this.cachedConnection && !forceFresh) {
         this.log(`Testing cached connection (port ${this.cachedConnection.port}, PID ${this.cachedConnection.pid}, HTTP: ${this.cachedConnection.useHttp})...`);
         try {
-          const quota = await this.fetchQuotaFromEndpoint(
+          const result = await this.fetchQuotaWithFallback(
             this.cachedConnection.port,
             this.cachedConnection.csrfToken,
-            1500,
-            this.cachedConnection.useHttp
+            2500,
+            !!this.cachedConnection.useHttp
           );
-          if (quota && quota.response && quota.response.groups) {
-            const userInfo = await this.fetchUserStatusFromEndpoint(
-              this.cachedConnection.port,
-              this.cachedConnection.csrfToken,
-              1200,
-              this.cachedConnection.useHttp
-            );
-            const parsed = this.parseQuotaResponse(quota, userInfo);
+          if (result && result.quota) {
+            const parsed = this.parseQuotaResponse(result.quota, result.userInfo);
             this.lastQuotaInfo = parsed;
             this.emit('quotaUpdated', parsed);
             this.isRefreshing = false;
             return parsed;
           }
+          this.log('Cached connection returned empty quota groups. Invalidating cache.');
+          this.cachedConnection = null;
         } catch (err: any) {
           this.log(`Cached connection failed: ${err.message || err}. Invalidating cache.`);
           this.cachedConnection = null;
         }
       }
 
-      // 2. Discover running language server / agy processes (prioritizing active workspace)
-      this.log('Discovering running Language Server / AGY processes...');
+      // 2. Discover running Antigravity daemon / language server (daemon JSON first, then process scan)
+      this.log('Discovering running Antigravity Daemon / Language Server / AGY...');
       const connection = await this.discoverAndConnect();
       if (connection) {
         this.log(`Connection established! Using port ${connection.port}, PID ${connection.pid}, HTTP: ${connection.useHttp}`);
         this.cachedConnection = connection;
-        const quota = await this.fetchQuotaFromEndpoint(
+        const result = await this.fetchQuotaWithFallback(
           connection.port,
           connection.csrfToken,
-          2500,
-          connection.useHttp
+          3000,
+          !!connection.useHttp
         );
-        if (quota && quota.response && quota.response.groups) {
-          const userInfo = await this.fetchUserStatusFromEndpoint(
-            connection.port,
-            connection.csrfToken,
-            1500,
-            connection.useHttp
-          );
-          const parsed = this.parseQuotaResponse(quota, userInfo);
+        if (result && result.quota) {
+          const parsed = this.parseQuotaResponse(result.quota, result.userInfo);
           this.lastQuotaInfo = parsed;
           this.emit('quotaUpdated', parsed);
           this.isRefreshing = false;
@@ -307,52 +315,254 @@ export class QuotaService extends EventEmitter {
     }
   }
 
-  private async discoverAndConnect(): Promise<LanguageServerConnection | null> {
-    const candidates = await this.findCandidateProcesses();
-    if (candidates.length === 0) {
-      this.log('No language_server or agy processes found in process list.');
-      return null;
+  private isPidAlive(pid: number): boolean {
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err: any) {
+      // EPERM means the process exists but belongs to another user/elevation
+      return err && err.code === 'EPERM';
     }
+  }
 
-    this.log(`Found ${candidates.length} candidate processes.`);
+  /**
+   * Stage 1 (Fast Path): Reads Antigravity daemon registry files (~/.gemini/antigravity/daemon/*.json).
+   * Works instantaneously (< 30ms) across Windows, macOS, and Linux without spawning PowerShell/ps/lsof/netstat,
+   * and remains resilient even if CLI flags, binary names, or WMI policies change.
+   */
+  private findDaemonFileCandidates(): CandidateProcess[] {
+    const home = os.homedir();
+    const daemonDirs = [
+      path.join(home, '.gemini', 'antigravity', 'daemon'),
+      path.join(home, '.gemini', 'antigravity-ide', 'daemon'),
+      path.join(home, '.gemini', 'antigravity-cli', 'daemon'),
+      path.join(home, '.antigravity', 'daemon'),
+    ];
 
-    // Try candidates in priority order
-    for (const candidate of candidates) {
-      this.log(`Testing candidate PID ${candidate.pid} (isIde: ${candidate.isIde}, wsMatch: ${candidate.isWorkspaceMatch}, useHttp: ${candidate.useHttp}) with ports: ${candidate.ports.join(', ')}`);
+    const rawEntries: { candidate: CandidateProcess; mtimeMs: number }[] = [];
+    const seenPids = new Set<string>();
 
-      if (candidate.ports.length === 0) continue;
-
-      // Test candidate ports in parallel with fast timeout
-      const probePromises = candidate.ports.map(async (port) => {
-        // Try candidate's expected protocol first, fallback to opposite protocol
-        const protocols = candidate.useHttp ? [true, false] : [false, true];
-        for (const useHttp of protocols) {
-          try {
-            const res = await this.fetchQuotaFromEndpoint(port, candidate.csrfToken, 1500, useHttp);
-            if (res && res.response && res.response.groups) {
-              return { port, res, useHttp };
+    for (const dir of daemonDirs) {
+      if (!fs.existsSync(dir)) continue;
+      try {
+        const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+        const withStats = files
+          .map((f) => {
+            const fullPath = path.join(dir, f);
+            try {
+              return { fullPath, mtimeMs: fs.statSync(fullPath).mtimeMs };
+            } catch {
+              return null;
             }
+          })
+          .filter((x): x is { fullPath: string; mtimeMs: number } => x !== null)
+          .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+        for (const file of withStats) {
+          try {
+            const content = fs.readFileSync(file.fullPath, 'utf8');
+            const parsed = JSON.parse(content);
+            if (!parsed || typeof parsed !== 'object') continue;
+
+            const numPid = Number(parsed.pid);
+            const csrfToken = String(parsed.csrfToken || parsed.csrf_token || '').trim();
+            const httpPort = Number(parsed.httpPort || parsed.http_port || parsed.port || 0) || undefined;
+            const httpsPort = Number(parsed.httpsPort || parsed.https_port || 0) || undefined;
+
+            if (!numPid || !csrfToken || (!httpPort && !httpsPort)) continue;
+            if (!this.isPidAlive(numPid)) continue;
+
+            const pidStr = String(numPid);
+            if (seenPids.has(pidStr)) continue;
+            seenPids.add(pidStr);
+
+            const ports: number[] = [];
+            if (httpPort) ports.push(httpPort);
+            if (httpsPort && httpsPort !== httpPort) ports.push(httpsPort);
+
+            rawEntries.push({
+              mtimeMs: file.mtimeMs,
+              candidate: {
+                pid: pidStr,
+                csrfToken,
+                ports,
+                httpPort,
+                httpsPort,
+                isIde: true,
+                isWorkspaceMatch: false,
+                useHttp: !!httpPort,
+                numPid,
+                createTime: file.mtimeMs,
+                source: 'daemon_file',
+              },
+            });
           } catch {}
         }
-        throw new Error(`Port ${port} returned empty/invalid response`);
-      });
-
-      try {
-        const winner = await Promise.any(probePromises);
-        this.log(`SUCCESS on PID ${candidate.pid} via port ${winner.port} (HTTP: ${winner.useHttp})!`);
-        return {
-          pid: candidate.pid,
-          csrfToken: candidate.csrfToken,
-          port: winner.port,
-          isIde: candidate.isIde,
-          useHttp: winner.useHttp,
-        };
-      } catch {
-        this.log(`Candidate PID ${candidate.pid} failed on all ports.`);
+      } catch (err: any) {
+        this.log(`Daemon dir read error (${dir}): ${err.message || err}`);
       }
     }
 
+    rawEntries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    if (rawEntries.length > 0) {
+      this.log(`Found ${rawEntries.length} live daemon file candidate(s) (newest PID ${rawEntries[0].candidate.pid}).`);
+    }
+    return rawEntries.map((e) => e.candidate);
+  }
+
+  private async probeCandidate(candidate: CandidateProcess): Promise<LanguageServerConnection | null> {
+    const targets: { port: number; useHttp: boolean }[] = [];
+
+    if (candidate.httpPort || candidate.httpsPort) {
+      if (candidate.httpPort) targets.push({ port: candidate.httpPort, useHttp: true });
+      if (candidate.httpsPort) targets.push({ port: candidate.httpsPort, useHttp: false });
+      for (const p of candidate.ports) {
+        if (p !== candidate.httpPort && p !== candidate.httpsPort) {
+          targets.push({ port: p, useHttp: candidate.useHttp });
+          targets.push({ port: p, useHttp: !candidate.useHttp });
+        }
+      }
+    } else {
+      const protocols = candidate.useHttp ? [true, false] : [false, true];
+      for (const port of candidate.ports) {
+        for (const useHttp of protocols) {
+          targets.push({ port, useHttp });
+        }
+      }
+    }
+
+    if (targets.length === 0) return null;
+
+    const probePromises = targets.map(async ({ port, useHttp }) => {
+      const res = await this.fetchQuotaWithFallback(port, candidate.csrfToken, 2000, useHttp);
+      if (res && res.quota) {
+        return { port, useHttp };
+      }
+      throw new Error(`Port ${port} (HTTP: ${useHttp}) returned empty quota`);
+    });
+
+    try {
+      const winner = await Promise.any(probePromises);
+      this.log(`SUCCESS on PID ${candidate.pid} (${candidate.source || 'scan'}) via port ${winner.port} (HTTP: ${winner.useHttp})!`);
+      return {
+        pid: candidate.pid,
+        csrfToken: candidate.csrfToken,
+        port: winner.port,
+        isIde: candidate.isIde,
+        useHttp: winner.useHttp,
+      };
+    } catch {
+      this.log(`Candidate PID ${candidate.pid} (${candidate.source || 'scan'}) failed on all ports: ${candidate.ports.join(', ')}.`);
+      return null;
+    }
+  }
+
+  private async discoverAndConnect(): Promise<LanguageServerConnection | null> {
+    // Stage 1: Fast path via ~/.gemini/antigravity/daemon/*.json (no PowerShell/ps/lsof required)
+    const daemonCandidates = this.findDaemonFileCandidates();
+    for (const candidate of daemonCandidates) {
+      const conn = await this.probeCandidate(candidate);
+      if (conn) return conn;
+    }
+
+    // Stage 2: Process scan fallback (handles legacy Antigravity / custom launches / missing daemon dir)
+    const procCandidates = await this.findCandidateProcesses();
+    if (procCandidates.length === 0) {
+      this.log('No language_server or agy processes found in daemon files or process list.');
+      return null;
+    }
+
+    this.log(`Found ${procCandidates.length} process candidate(s) via OS scan.`);
+    const alreadyTriedPids = new Set(daemonCandidates.map((c) => c.pid));
+
+    for (const candidate of procCandidates) {
+      if (alreadyTriedPids.has(candidate.pid)) continue;
+      this.log(`Testing candidate PID ${candidate.pid} (isIde: ${candidate.isIde}, wsMatch: ${candidate.isWorkspaceMatch}, hubSub: ${!!candidate.isHubSubclient}, useHttp: ${candidate.useHttp}) with ports: ${candidate.ports.join(', ')}`);
+      const conn = await this.probeCandidate(candidate);
+      if (conn) return conn;
+    }
+
     return null;
+  }
+
+  private extractCsrfToken(cmdLine: string): string | null {
+    const match = cmdLine.match(/--(?:extension_server_)?csrf_token[=\s]+["']?([^\s"']+)["']?/i);
+    return match ? match[1] : null;
+  }
+
+  private extractGuessedPorts(cmdLine: string): { ports: number[]; httpPort?: number; httpsPort?: number } {
+    const ports: number[] = [];
+    let httpPort: number | undefined;
+    let httpsPort: number | undefined;
+
+    const hubPortMatch = cmdLine.match(/--hub-port[=\s]+(\d+)/i);
+    if (hubPortMatch) {
+      const p = parseInt(hubPortMatch[1], 10);
+      if (p > 0) {
+        httpPort = p;
+        ports.push(p);
+      }
+    }
+
+    const httpPortMatch = cmdLine.match(/--http_server_port[=\s]+(\d+)/i);
+    if (httpPortMatch) {
+      const p = parseInt(httpPortMatch[1], 10);
+      if (p > 0) {
+        httpPort = httpPort || p;
+        ports.push(p);
+      }
+    }
+
+    const httpsPortMatch = cmdLine.match(/--https_server_port[=\s]+(\d+)/i);
+    if (httpsPortMatch) {
+      const p = parseInt(httpsPortMatch[1], 10);
+      if (p > 0) {
+        httpsPort = p;
+        ports.push(p);
+      }
+    }
+
+    const extPortMatch = cmdLine.match(/--extension_server_port[=\s]+(\d+)/i);
+    if (extPortMatch) {
+      const basePort = parseInt(extPortMatch[1], 10);
+      if (basePort > 0) {
+        for (let i = 1; i <= 6; i++) {
+          ports.push(basePort + i);
+        }
+      }
+    }
+
+    return { ports: Array.from(new Set(ports)), httpPort, httpsPort };
+  }
+
+  private async getAllWindowsListeningPortsByPid(): Promise<Map<string, number[]>> {
+    const map = new Map<string, number[]>();
+    try {
+      const winDir = process.env.SystemRoot || 'C:\\Windows';
+      const { stdout: netstatOut } = await execAsync(`"${winDir}\\System32\\netstat.exe" -ano`, {
+        encoding: 'utf8',
+        timeout: 4000,
+      });
+      const lines = netstatOut.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.includes('LISTENING')) continue;
+        const pidMatch = trimmed.match(/\s(\d+)$/);
+        if (!pidMatch) continue;
+        const pid = pidMatch[1];
+        const portMatch = trimmed.match(/(?:127\.0\.0\.1|\[::1\]|0\.0\.0\.0|\[::\]):(\d+)/);
+        if (!portMatch) continue;
+        const p = parseInt(portMatch[1], 10);
+        if (isNaN(p) || p <= 0) continue;
+        const existing = map.get(pid) || [];
+        if (!existing.includes(p)) {
+          existing.push(p);
+          map.set(pid, existing);
+        }
+      }
+    } catch {}
+    return map;
   }
 
   private async findCandidateProcesses(): Promise<CandidateProcess[]> {
@@ -366,63 +576,58 @@ export class QuotaService extends EventEmitter {
 
     if (platform === 'darwin' || platform === 'linux') {
       try {
-        const { stdout: psOut } = await execAsync('ps aux', { encoding: 'utf8', timeout: 4000 });
+        let psOut = '';
+        try {
+          // Use wide non-truncated output so long --add-dir paths never cut off --csrf_token
+          const res = await execAsync('ps -eo pid=,args=', { encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 });
+          psOut = res.stdout;
+        } catch {
+          const res = await execAsync('ps auxww', { encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 });
+          psOut = res.stdout;
+        }
         const lines = psOut.split('\n');
 
         for (const line of lines) {
-          const isLsp = line.includes('language_server');
-          const isAgy = line.includes('agy') || line.includes('--hub');
-          if ((isLsp || isAgy) && line.includes('--csrf_token')) {
-            // Ignore standalone hub processes with https_server_port 0 which do not serve quota
-            if (
-              line.includes('--subclient_type hub') ||
-              (line.includes('--https_server_port 0') && !line.includes('--extension_server_port') && !line.includes('--hub-port'))
-            ) {
-              continue;
-            }
+          const trimmed = line.trim();
+          if (!trimmed) continue;
 
-            const pidMatch = line.trim().match(/^\S+\s+(\d+)/);
-            const csrfMatch = line.match(/--csrf_token[=\s]+([a-f0-9-]+)/i);
-            if (pidMatch && csrfMatch) {
+          const isLsp = trimmed.includes('language_server');
+          const isAgy = trimmed.includes('agy') || trimmed.includes('--hub');
+          const hasCsrf = trimmed.includes('csrf_token');
+
+          if ((isLsp || isAgy || hasCsrf) && hasCsrf) {
+            const pidMatch = trimmed.match(/^(\d+)\s+/) || trimmed.match(/^\S+\s+(\d+)\s+/);
+            const csrfToken = this.extractCsrfToken(trimmed);
+            if (pidMatch && csrfToken) {
               const pid = pidMatch[1];
-              const csrfToken = csrfMatch[1];
+              const isHubSubclient = trimmed.includes('--subclient_type hub');
               const isIde =
-                line.includes('--subclient_type ide') ||
-                line.includes('antigravity-ide') ||
+                trimmed.includes('--subclient_type ide') ||
+                trimmed.includes('antigravity') ||
                 isAgy;
 
-              const lineLower = line.toLowerCase();
+              const lineLower = trimmed.toLowerCase();
               const isWorkspaceMatch = currentWorkspaces.some((w) => lineLower.includes(w));
 
-              const hubPortMatch = line.match(/--hub-port[=\s]+(\d+)/i);
-              const extPortMatch = line.match(/--extension_server_port[=\s]+(\d+)/i);
-              const guessedPorts: number[] = [];
-
-              if (hubPortMatch) {
-                guessedPorts.push(parseInt(hubPortMatch[1], 10));
-              }
-              if (extPortMatch) {
-                const basePort = parseInt(extPortMatch[1], 10);
-                for (let i = 1; i <= 6; i++) {
-                  guessedPorts.push(basePort + i);
-                }
-              }
-
-              // Get actual listening ports via lsof/netstat
+              const guessed = this.extractGuessedPorts(trimmed);
               const activePorts = await this.getListeningPortsForPid(pid);
+              const ports = Array.from(new Set([...guessed.ports, ...activePorts]));
 
-              // Merge actual ports and guessed ports (keeping guessed hub port first)
-              const ports = Array.from(new Set([...guessedPorts, ...activePorts]));
+              if (ports.length === 0) continue;
 
-              this.log(`Discovered candidate PID ${pid} (Active: ${activePorts.join(',')} | Guessed: ${guessedPorts.join(',')} | isAgy: ${isAgy})`);
+              this.log(`Discovered Unix candidate PID ${pid} (Active: ${activePorts.join(',')} | Guessed: ${guessed.ports.join(',')} | isAgy: ${isAgy} | hubSub: ${isHubSubclient})`);
               candidates.push({
                 pid,
                 csrfToken,
                 ports,
+                httpPort: guessed.httpPort,
+                httpsPort: guessed.httpsPort,
                 isIde,
                 isWorkspaceMatch,
-                useHttp: isAgy,
+                isHubSubclient,
+                useHttp: isAgy || !!guessed.httpPort,
                 numPid: parseInt(pid, 10) || 0,
+                source: 'process_scan',
               });
             }
           }
@@ -432,12 +637,16 @@ export class QuotaService extends EventEmitter {
       }
     } else if (platform === 'win32') {
       try {
-        const psScript = `$ProgressPreference = 'SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -like '*language_server*' -or $_.Name -like '*agy*') -and ($_.CommandLine -like '*--csrf_token*') } | Select-Object ProcessId, CommandLine, CreationDate | ConvertTo-Json -Compress`;
+        const psScript = `$ProgressPreference = 'SilentlyContinue'; $procs = Get-CimInstance Win32_Process | Where-Object { ($_.CommandLine -like '*csrf_token*') -or (($_.Name -like '*language_server*' -or $_.Name -like '*agy*' -or $_.Name -like '*antigravity*') -and ($_.CommandLine -like '*--hub-port*' -or $_.CommandLine -like '*--extension_server_port*')) } | Select-Object ProcessId, Name, CommandLine, CreationDate; if ($procs) { $procs | ConvertTo-Json -Compress } else { '[]' }`;
         const base64Script = Buffer.from(psScript, 'utf16le').toString('base64');
-        const { stdout: rawOut } = await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${base64Script}`, {
-          encoding: 'utf8',
-          timeout: 5000,
-        });
+        const [{ stdout: rawOut }, portsByPid] = await Promise.all([
+          execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${base64Script}`, {
+            encoding: 'utf8',
+            timeout: 10000,
+            maxBuffer: 8 * 1024 * 1024,
+          }),
+          this.getAllWindowsListeningPortsByPid(),
+        ]);
 
         const jsonStart = rawOut.indexOf('[');
         const jsonStartObj = rawOut.indexOf('{');
@@ -445,67 +654,54 @@ export class QuotaService extends EventEmitter {
           ? Math.min(jsonStart, jsonStartObj)
           : (jsonStart !== -1 ? jsonStart : jsonStartObj);
 
-        const cleanJson = startIdx !== -1 ? rawOut.substring(startIdx).trim() : rawOut.trim();
-        const items = JSON.parse(cleanJson);
-        const list = Array.isArray(items) ? items : [items];
+        const cleanJson = startIdx !== -1 ? rawOut.substring(startIdx).trim() : '';
+        if (cleanJson) {
+          const items = JSON.parse(cleanJson);
+          const list = Array.isArray(items) ? items : [items];
 
-        for (const item of list) {
-          if (item && item.CommandLine && item.CommandLine.includes('--csrf_token')) {
-            if (
-              item.CommandLine.includes('--subclient_type hub') ||
-              (item.CommandLine.includes('--https_server_port 0') && !item.CommandLine.includes('--extension_server_port') && !item.CommandLine.includes('--hub-port'))
-            ) {
-              continue;
-            }
+          for (const item of list) {
+            if (!item || !item.CommandLine) continue;
+            const cmdLine = String(item.CommandLine);
+            const csrfToken = this.extractCsrfToken(cmdLine);
+            if (!csrfToken) continue;
 
             const pid = String(item.ProcessId);
-            const csrfMatch = item.CommandLine.match(/--csrf_token[=\s]+([a-f0-9-]+)/i);
-            if (csrfMatch) {
-              const csrfToken = csrfMatch[1];
-              const isAgy = item.CommandLine.includes('agy') || item.CommandLine.includes('--hub');
-              const isIde = item.CommandLine.includes('antigravity') || isAgy;
+            const isHubSubclient = cmdLine.includes('--subclient_type hub');
+            const isAgy = cmdLine.toLowerCase().includes('agy') || cmdLine.includes('--hub');
+            const isIde = cmdLine.toLowerCase().includes('antigravity') || isAgy;
 
-              const cmdLower = item.CommandLine.toLowerCase();
-              const isWorkspaceMatch = currentWorkspaces.some((w) => cmdLower.includes(w));
+            const cmdLower = cmdLine.toLowerCase();
+            const isWorkspaceMatch = currentWorkspaces.some((w) => cmdLower.includes(w));
 
-              const hubPortMatch = item.CommandLine.match(/--hub-port[=\s]+(\d+)/i);
-              const extPortMatch = item.CommandLine.match(/--extension_server_port[=\s]+(\d+)/i);
-              const guessedPorts: number[] = [];
+            const guessed = this.extractGuessedPorts(cmdLine);
+            const activePorts = portsByPid.get(pid) || [];
+            const ports = Array.from(new Set([...guessed.ports, ...activePorts]));
+            if (ports.length === 0) continue;
 
-              if (hubPortMatch) {
-                guessedPorts.push(parseInt(hubPortMatch[1], 10));
+            let createTime = 0;
+            if (item.CreationDate) {
+              const numMatch = String(item.CreationDate).match(/\d+/);
+              if (numMatch) {
+                createTime = parseInt(numMatch[0], 10);
+              } else {
+                createTime = new Date(item.CreationDate).getTime() || 0;
               }
-              if (extPortMatch) {
-                const basePort = parseInt(extPortMatch[1], 10);
-                for (let i = 1; i <= 6; i++) {
-                  guessedPorts.push(basePort + i);
-                }
-              }
-
-              const activePorts = await this.getListeningPortsForPid(pid);
-              const ports = Array.from(new Set([...guessedPorts, ...activePorts]));
-
-              let createTime = 0;
-              if (item.CreationDate) {
-                const numMatch = String(item.CreationDate).match(/\d+/);
-                if (numMatch) {
-                  createTime = parseInt(numMatch[0], 10);
-                } else {
-                  createTime = new Date(item.CreationDate).getTime() || 0;
-                }
-              }
-              this.log(`Discovered Windows candidate PID ${pid} (Active: ${activePorts.join(',')} | Guessed: ${guessedPorts.join(',')} | wsMatch: ${isWorkspaceMatch} | isAgy: ${isAgy})`);
-              candidates.push({
-                pid,
-                csrfToken,
-                ports,
-                isIde,
-                isWorkspaceMatch,
-                useHttp: isAgy,
-                numPid: parseInt(pid, 10) || 0,
-                createTime,
-              });
             }
+            this.log(`Discovered Windows candidate PID ${pid} (Active: ${activePorts.join(',')} | Guessed: ${guessed.ports.join(',')} | wsMatch: ${isWorkspaceMatch} | isAgy: ${isAgy} | hubSub: ${isHubSubclient})`);
+            candidates.push({
+              pid,
+              csrfToken,
+              ports,
+              httpPort: guessed.httpPort,
+              httpsPort: guessed.httpsPort,
+              isIde,
+              isWorkspaceMatch,
+              isHubSubclient,
+              useHttp: isAgy || !!guessed.httpPort,
+              numPid: parseInt(pid, 10) || 0,
+              createTime,
+              source: 'process_scan',
+            });
           }
         }
       } catch (err: any) {
@@ -515,10 +711,12 @@ export class QuotaService extends EventEmitter {
 
     // Sort priority:
     // 1. Matching workspace directory first
-    // 2. isIde first
-    // 3. Newest process by CreationDate (falling back to PID)
+    // 2. Non-hub-subclient IDE processes before standalone --subclient_type hub
+    // 3. isIde first
+    // 4. Newest process by CreationDate (falling back to PID)
     candidates.sort((a, b) => {
       if (b.isWorkspaceMatch !== a.isWorkspaceMatch) return (b.isWorkspaceMatch ? 1 : 0) - (a.isWorkspaceMatch ? 1 : 0);
+      if (!!a.isHubSubclient !== !!b.isHubSubclient) return (a.isHubSubclient ? 1 : 0) - (b.isHubSubclient ? 1 : 0);
       if (b.isIde !== a.isIde) return (b.isIde ? 1 : 0) - (a.isIde ? 1 : 0);
       if (b.createTime && a.createTime && b.createTime !== a.createTime) {
         return b.createTime - a.createTime;
@@ -546,7 +744,7 @@ export class QuotaService extends EventEmitter {
         try {
           const { stdout: lsofOut } = await execAsync(`${lsofPath} -nP -a -p ${pid} -iTCP -sTCP:LISTEN`, {
             encoding: 'utf8',
-            timeout: 2000,
+            timeout: 2500,
           });
           if (lsofOut) {
             const matches = [...lsofOut.matchAll(/:(\d+)\s+\(LISTEN\)/g)];
@@ -567,9 +765,9 @@ export class QuotaService extends EventEmitter {
           try {
             const { stdout: netstatOut } = await execAsync(`${netstatPath} -anp 2>/dev/null | grep ${pid}`, {
               encoding: 'utf8',
-              timeout: 2000,
+              timeout: 2500,
             });
-            const matches = [...netstatOut.matchAll(/127\.0\.0\.1:(\d+)/g)];
+            const matches = [...netstatOut.matchAll(/(?:127\.0\.0\.1|\[::1\]|0\.0\.0\.0|::):(\d+)/g)];
             for (const m of matches) {
               const p = parseInt(m[1], 10);
               if (!isNaN(p) && !ports.includes(p)) {
@@ -580,27 +778,25 @@ export class QuotaService extends EventEmitter {
           } catch {}
         }
       }
-    } else if (platform === 'win32') {
-      try {
-        const winDir = process.env.SystemRoot || 'C:\\Windows';
-        const { stdout: netstatOut } = await execAsync(`"${winDir}\\System32\\netstat.exe" -ano`, {
-          encoding: 'utf8',
-          timeout: 2500,
-        });
-        const lines = netstatOut.split('\n');
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.endsWith(` ${pid}`) && trimmed.includes('LISTENING')) {
-            const match = trimmed.match(/127\.0\.0\.1:(\d+)/);
-            if (match) {
-              const p = parseInt(match[1], 10);
-              if (!isNaN(p) && !ports.includes(p)) {
-                ports.push(p);
-              }
+
+      if (ports.length === 0 && platform === 'linux') {
+        try {
+          const { stdout: ssOut } = await execAsync(`ss -tlnp 2>/dev/null | grep "pid=${pid},"`, {
+            encoding: 'utf8',
+            timeout: 2500,
+          });
+          const matches = [...ssOut.matchAll(/(?:127\.0\.0\.1|\[::1\]|0\.0\.0\.0|\*):(\d+)/g)];
+          for (const m of matches) {
+            const p = parseInt(m[1], 10);
+            if (!isNaN(p) && !ports.includes(p)) {
+              ports.push(p);
             }
           }
-        }
-      } catch {}
+        } catch {}
+      }
+    } else if (platform === 'win32') {
+      const portsByPid = await this.getAllWindowsListeningPortsByPid();
+      return portsByPid.get(pid) || [];
     }
 
     return ports;
@@ -611,7 +807,7 @@ export class QuotaService extends EventEmitter {
     csrfToken: string,
     timeoutMs: number = 1500,
     useHttp: boolean = false
-  ): Promise<{ name?: string; email?: string; planName?: string } | null> {
+  ): Promise<UserStatusResult | null> {
     return new Promise((resolve) => {
       let isSettled = false;
       const timer = setTimeout(() => {
@@ -653,7 +849,11 @@ export class QuotaService extends EventEmitter {
                   resolve({
                     name: user.name,
                     email: user.email,
-                    planName: user.planStatus?.planInfo?.planName || user.plan,
+                    planName:
+                      user.planStatus?.planInfo?.planName ||
+                      user.userTier?.name ||
+                      user.plan,
+                    rawUserStatus: user,
                   });
                   return;
                 }
@@ -675,6 +875,108 @@ export class QuotaService extends EventEmitter {
       req.write(payload);
       req.end();
     });
+  }
+
+  /**
+   * Builds a compatible QuotaSummaryResponse from GetUserStatus.cascadeModelConfigData.clientModelConfigs
+   * when RetrieveUserQuotaSummary is unavailable or returns empty groups on certain Antigravity builds.
+   */
+  private buildFallbackQuotaFromUserStatus(rawUserStatus: any): QuotaSummaryResponse | null {
+    const configs = rawUserStatus?.cascadeModelConfigData?.clientModelConfigs;
+    if (!Array.isArray(configs) || configs.length === 0) return null;
+
+    const groupMap = new Map<string, { displayName: string; minFrac: number; resetTime?: string }>();
+
+    for (const cfg of configs) {
+      const qi = cfg?.quotaInfo;
+      if (!qi || typeof qi.remainingFraction !== 'number') continue;
+      const label = String(cfg.label || '');
+      const lower = label.toLowerCase();
+
+      let key = 'other';
+      let displayName = 'Other Models';
+      if (lower.includes('carbon')) {
+        key = 'carbon';
+        displayName = 'Gemini 4 Carbon';
+      } else if (lower.includes('argon')) {
+        key = 'argon';
+        displayName = 'Gemini 4 Argon';
+      } else if (lower.includes('gemini') || lower.includes('orchestrator')) {
+        key = 'gemini';
+        displayName = 'Gemini Models';
+      } else if (lower.includes('claude') || lower.includes('gpt')) {
+        key = 'claude_gpt';
+        displayName = 'Claude and GPT models';
+      }
+
+      const prev = groupMap.get(key);
+      if (!prev || qi.remainingFraction < prev.minFrac) {
+        groupMap.set(key, {
+          displayName,
+          minFrac: qi.remainingFraction,
+          resetTime: qi.resetTime || prev?.resetTime,
+        });
+      }
+    }
+
+    if (groupMap.size === 0) return null;
+
+    const groups: QuotaGroup[] = [];
+    for (const [key, info] of groupMap.entries()) {
+      const resetMs = info.resetTime ? new Date(info.resetTime).getTime() - Date.now() : 0;
+      const isWeeklyOnly = key === 'argon' || (key === 'carbon' && resetMs > 12 * 60 * 60 * 1000);
+      groups.push({
+        displayName: info.displayName,
+        buckets: [
+          {
+            bucketId: `${key}-${isWeeklyOnly ? 'weekly' : '5h'}`,
+            displayName: isWeeklyOnly ? `${info.displayName} Weekly Limit` : 'Five Hour Limit Remaining',
+            window: isWeeklyOnly ? 'weekly' : '5h',
+            remainingFraction: info.minFrac,
+            resetTime: info.resetTime,
+          },
+        ],
+      });
+    }
+
+    return { response: { groups } };
+  }
+
+  private async fetchQuotaWithFallback(
+    port: number,
+    csrfToken: string,
+    timeoutMs: number = 2500,
+    useHttp: boolean = false
+  ): Promise<{ quota: QuotaSummaryResponse; userInfo: UserStatusResult | null } | null> {
+    let summary: QuotaSummaryResponse | null = null;
+    try {
+      const res = await this.fetchQuotaFromEndpoint(port, csrfToken, timeoutMs, useHttp);
+      const groups = res?.response?.groups || (res as any)?.groups;
+      if (Array.isArray(groups) && groups.length > 0) {
+        summary = res?.response?.groups ? res : { response: { groups } };
+      }
+    } catch {}
+
+    const userInfo = await this.fetchUserStatusFromEndpoint(
+      port,
+      csrfToken,
+      Math.min(timeoutMs, 1800),
+      useHttp
+    );
+
+    if (summary) {
+      return { quota: summary, userInfo };
+    }
+
+    if (userInfo?.rawUserStatus) {
+      const fallback = this.buildFallbackQuotaFromUserStatus(userInfo.rawUserStatus);
+      if (fallback) {
+        this.log(`Using GetUserStatus fallback quota on port ${port} (HTTP: ${useHttp}).`);
+        return { quota: fallback, userInfo };
+      }
+    }
+
+    return null;
   }
 
   private async fetchQuotaFromEndpoint(
@@ -752,7 +1054,7 @@ export class QuotaService extends EventEmitter {
     data: QuotaSummaryResponse,
     userInfo?: { name?: string; email?: string; planName?: string } | null
   ): ParsedQuotaInfo {
-    const rawGroups: QuotaGroup[] = data.response?.groups || [];
+    const rawGroups: QuotaGroup[] = data.response?.groups || (data as any).groups || [];
     // Keep only groups that actually possess at least one bucket (prevents --% on Free/custom plans)
     const groups = rawGroups.filter((g) => Array.isArray(g.buckets) && g.buckets.length > 0);
 
@@ -801,14 +1103,24 @@ export class QuotaService extends EventEmitter {
 
   /**
    * Classifies a model group across Free, Plus, Pro, Ultra, and Enterprise accounts.
-   * Checks 'argon' before 'gemini' since "Gemini 4 Argon" contains "gemini".
+   * Checks 'carbon' and 'argon' before 'gemini' since "Gemini 4 Carbon" and "Gemini 4 Argon" contain "gemini".
    */
   public static identifyGroupType(group: QuotaGroup): ModelGroupType {
     const nameLower = (group.displayName || '').toLowerCase();
-    const hasArgonBucket = (group.buckets || []).some((b) =>
-      (b.bucketId || '').toLowerCase().includes('argon')
-    );
+    const hasCarbonBucket = (group.buckets || []).some((b) => {
+      const id = (b.bucketId || '').toLowerCase();
+      const dn = (b.displayName || '').toLowerCase();
+      return id.includes('carbon') || dn.includes('carbon');
+    });
+    const hasArgonBucket = (group.buckets || []).some((b) => {
+      const id = (b.bucketId || '').toLowerCase();
+      const dn = (b.displayName || '').toLowerCase();
+      return id.includes('argon') || dn.includes('argon');
+    });
 
+    if (nameLower.includes('carbon') || hasCarbonBucket) {
+      return 'carbon';
+    }
     if (nameLower.includes('argon') || hasArgonBucket) {
       return 'argon';
     }
@@ -832,6 +1144,8 @@ export class QuotaService extends EventEmitter {
   public static getShortGroupLabel(group: QuotaGroup): string {
     const type = QuotaService.identifyGroupType(group);
     switch (type) {
+      case 'carbon':
+        return 'Carb';
       case 'argon':
         return 'Ar';
       case 'gemini':
@@ -1017,6 +1331,9 @@ export class QuotaService extends EventEmitter {
     }
 
     if (groups.length > 0) {
+      const hasCarbon = groups.some((g) => QuotaService.identifyGroupType(g) === 'carbon');
+      if (hasCarbon) return 'ultra';
+
       const hasProModels = groups.some((g) => {
         const t = QuotaService.identifyGroupType(g);
         return t === 'argon' || t === 'claude_gpt';

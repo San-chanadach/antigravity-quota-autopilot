@@ -8,7 +8,7 @@ export interface QuotaBucket {
   disabled?: boolean;
 }
 
-export type ModelGroupType = 'gemini' | 'claude_gpt' | 'argon' | 'other';
+export type ModelGroupType = 'gemini' | 'claude_gpt' | 'argon' | 'carbon' | 'other';
 
 export interface QuotaGroup {
   displayName: string;

@@ -1,20 +1,31 @@
 # Antigravity AI Quota & Auto-Accept Autopilot
 
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.2-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.3-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
 [![Author: San Chanadach](https://img.shields.io/badge/Author-San%20Chanadach-blue.svg)](https://github.com/San-chanadach)
 [![Ko-fi: Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-ff5e5b?style=flat&logo=ko-fi)](https://ko-fi.com/sanchanadach)
 [![Antigravity IDE: v2.6.0+](https://img.shields.io/badge/Antigravity%20IDE-v2.6.0%2B-purple.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)** — featuring **1-Click Native Turbo Autopilot**, instant **Global Permissions & Plan Review Policy** controls (`Ctrl+Alt+A`), dynamic **Multi-Model AI Quota Tracking** across **Free / Plus / Pro / Ultra** accounts (including **Gemini 4 Argon**), and an automated **1,000-Turn Activity Logger**.
+A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)** — featuring **1-Click Native Turbo Autopilot**, instant **Global Permissions & Plan Review Policy** controls (`Ctrl+Alt+A`), dynamic **Multi-Model AI Quota Tracking** across **Free / Plus / Pro / Ultra** accounts (including **Gemini 4 Argon & Carbon**), and an automated **1,000-Turn Activity Logger**.
 
 ---
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/San-chanadach/antigravity-quota-autopilot/main/assets/preview.gif" alt="Antigravity Quota & Native Autopilot Preview" width="482" />
   <br />
-  <em>Minimalist Status Bar &amp; Hover Controls: View real-time multi-model quotas (Gemini, Claude/GPT, Argon) and switch Global Permissions or Plan Review Policy in 1 click.</em>
+  <em>Minimalist Status Bar &amp; Hover Controls: View real-time multi-model quotas (Gemini, Claude/GPT, Argon, Carbon) and switch Global Permissions or Plan Review Policy in 1 click.</em>
 </p>
+
+---
+
+## What's New in v1.2.3
+
+- **Instant Daemon Discovery & Offline Connection Fix (Antigravity Latest Update)**:
+  - Added Stage 1 fast-path discovery via Antigravity daemon registry files (`~/.gemini/antigravity/daemon/*.json`) with instant PID liveness checks — connecting in ~100ms without PowerShell/WMI timeouts or `ps aux` truncation.
+  - Hardened Stage 2 OS process discovery across Windows, macOS, and Linux: supports single-hub (`--subclient_type hub`), `--extension_server_csrf_token`, non-hex CSRF tokens, wide `ps -eo pid=,args=`, IPv6/wildcard ports (`[::1]`, `0.0.0.0`), and automatic `GetUserStatus` quota fallback.
+- **Google AI Ultra & Gemini 4 Carbon Support**:
+  - Full classification and dedicated Status Bar label (**`Carb`**) for **Gemini 4 Carbon** alongside Gemini Models (`Gemi`), Claude/GPT (`Cl`), and Gemini 4 Argon (`Ar`).
+  - Prevents duplicate `Gemi:` labels on Ultra accounts, supports `Gemini Only` mode filtering, and cleanly hides unavailable Carbon entries on Free/Plus/Pro tiers.
 
 ---
 
@@ -118,7 +129,7 @@ Adapts automatically to whatever plan and model groups your account has:
 3. Click **Install**.
 
 ### Method 2: Install from `.vsix` Release
-1. Download `antigravity-quota-autopilot-1.2.2.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
+1. Download `antigravity-quota-autopilot-1.2.3.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
 2. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) -> **Extensions: Install from VSIX...**.
 3. Select the `.vsix` file and reload the window.
 

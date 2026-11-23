@@ -122,7 +122,7 @@ export class StatusBarManager implements vscode.Disposable {
     if (format === 'geminiOnly') {
       const geminiGroups = groups.filter((g) => {
         const t = QuotaService.identifyGroupType(g);
-        return t === 'gemini' || t === 'argon';
+        return t === 'gemini' || t === 'argon' || t === 'carbon';
       });
       if (geminiGroups.length > 0) {
         targetGroups = geminiGroups;

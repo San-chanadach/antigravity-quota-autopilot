@@ -1,8 +1,8 @@
 {
   "name": "antigravity-quota-autopilot",
   "displayName": "Antigravity AI Quota & Auto-Accept Autopilot",
-  "description": "Real-time AI model quota monitor (Free/Plus/Pro/Ultra/Gemini 4 Argon), native Turbo Autopilot & Agent Behavior controller, and activity logger for Google Antigravity IDE v2.6.0+.",
-  "version": "1.2.2",
+  "description": "Real-time AI model quota monitor (Free/Plus/Pro/Ultra/Gemini 4 Argon & Carbon), native Turbo Autopilot & Agent Behavior controller, and activity logger for Google Antigravity IDE v2.6.0+.",
+  "version": "1.2.3",
   "publisher": "san-chanadach",
   "author": "San Chanadach",
   "license": "MIT",
@@ -157,9 +157,9 @@
             "smartLowest"
           ],
           "enumDescriptions": [
-            "Show all active model groups dynamically (e.g. Gemi: 95% | Cl: 100% | Ar: 32%)",
-            "Prefer 5-hour limits when available, and weekly limits for weekly-only models (e.g. Gemini 4 Argon)",
-            "Show Gemini & Argon model groups only",
+            "Show all active model groups dynamically (e.g. Gemi: 95% | Cl: 100% | Ar: 32% | Carb: 80%)",
+            "Prefer 5-hour limits when available, and weekly limits for weekly-only models (e.g. Gemini 4 Argon / Carbon)",
+            "Show Gemini, Argon & Carbon model groups only",
             "Compact mode with lowest remaining percentage (e.g. Quota: 32% (Ar))",
             "Smart mode: highlights only the model group with the lowest remaining quota"
           ],
