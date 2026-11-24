@@ -186,6 +186,25 @@ export class QuotaTreeDataProvider implements vscode.TreeDataProvider<QuotaTreeI
         );
       }
 
+      if (typeof quota.availableAiCredits === 'number' && quota.availableAiCredits > 0) {
+        const minReq = quota.minimumCreditAmountForUsage || 0;
+        const creditDot = minReq > 0 && quota.availableAiCredits < minReq ? '🟡' : '🟢';
+        const overage =
+          typeof quota.useAiCredits === 'boolean'
+            ? ` · Overages: ${quota.useAiCredits ? 'ON' : 'OFF'}`
+            : '';
+        items.push(
+          new QuotaTreeItem(
+            `${creditDot} Model Credits`,
+            vscode.TreeItemCollapsibleState.None,
+            'info',
+            undefined,
+            undefined,
+            `${quota.availableAiCredits.toLocaleString()} Available${overage}`
+          )
+        );
+      }
+
       items.push(
         new QuotaTreeItem(
           'Last Synced',

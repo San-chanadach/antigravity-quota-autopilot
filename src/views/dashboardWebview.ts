@@ -1038,6 +1038,32 @@ export class DashboardWebviewPanel {
         html += '</div>';
       }
 
+      if (typeof data.availableAiCredits === 'number' && data.availableAiCredits > 0) {
+        const minReq = data.minimumCreditAmountForUsage || 0;
+        const creditDot = minReq > 0 && data.availableAiCredits < minReq ? '🟡' : '🟢';
+        const creditColor = minReq > 0 && data.availableAiCredits < minReq ? 'var(--accent-yellow)' : 'var(--accent-green)';
+        const overageMeta = typeof data.useAiCredits === 'boolean'
+          ? (data.useAiCredits
+              ? 'AI credit overages enabled (used automatically when model quota is exhausted)'
+              : 'AI credit overages disabled in Antigravity settings')
+          : 'Used automatically once model quota is exhausted';
+
+        html += '<div class="group-section">';
+        html += '  <div class="group-header">';
+        html += '    <span class="group-title">Model Credits</span>';
+        html += '  </div>';
+        html += '  <div class="bucket-card">';
+        html += '    <div class="bucket-info">';
+        html += '      <div class="bucket-name"><span>' + creditDot + '</span><span>Available AI credits</span></div>';
+        html += '      <div class="bucket-meta">' + overageMeta + '</div>';
+        html += '    </div>';
+        html += '    <div class="gauge-wrapper">';
+        html += '      <div class="gauge-percentage" style="color: ' + creditColor + '; min-width: auto;">' + Number(data.availableAiCredits).toLocaleString() + '</div>';
+        html += '    </div>';
+        html += '  </div>';
+        html += '</div>';
+      }
+
       container.innerHTML = html;
     }
 

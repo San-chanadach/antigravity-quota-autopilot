@@ -2,7 +2,7 @@
   "name": "antigravity-quota-autopilot",
   "displayName": "Antigravity AI Quota & Auto-Accept Autopilot",
   "description": "Real-time AI model quota monitor (Free/Plus/Pro/Ultra/Gemini 4 Argon & Carbon), native Turbo Autopilot & Agent Behavior controller, and activity logger for Google Antigravity IDE v2.6.0+.",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "publisher": "san-chanadach",
   "author": "San Chanadach",
   "license": "MIT",

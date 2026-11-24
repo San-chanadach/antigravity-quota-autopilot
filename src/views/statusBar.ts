@@ -191,6 +191,23 @@ export class StatusBarManager implements vscode.Disposable {
         );
       }
       md.appendMarkdown(`\n`);
+
+      // === MODEL CREDITS (Shown only when user has Available AI Credits > 0) ===
+      if (
+        typeof this.lastQuota.availableAiCredits === 'number' &&
+        this.lastQuota.availableAiCredits > 0
+      ) {
+        const credits = this.lastQuota.availableAiCredits;
+        const minReq = this.lastQuota.minimumCreditAmountForUsage || 0;
+        const creditDot = minReq > 0 && credits < minReq ? '🟡' : '🟢';
+        const overageSuffix =
+          typeof this.lastQuota.useAiCredits === 'boolean'
+            ? ` · Overages: ${this.lastQuota.useAiCredits ? 'ON' : 'OFF'}`
+            : '';
+        md.appendMarkdown(
+          `**Model Credits:** ${creditDot} Available AI credits: \`${credits.toLocaleString()}\`${overageSuffix}\n\n`
+        );
+      }
     } else {
       md.appendMarkdown(`Loading model quota limits...\n\n`);
     }

@@ -1,6 +1,6 @@
 # Antigravity AI Quota & Auto-Accept Autopilot
 
-[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.3-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
+[![Open VSX](https://img.shields.io/badge/Open%20VSX-v1.2.4-blue.svg)](https://open-vsx.org/extension/san-chanadach/antigravity-quota-autopilot)
 [![Author: San Chanadach](https://img.shields.io/badge/Author-San%20Chanadach-blue.svg)](https://github.com/San-chanadach)
 [![Ko-fi: Buy Me a Coffee](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-ff5e5b?style=flat&logo=ko-fi)](https://ko-fi.com/sanchanadach)
 [![Antigravity IDE: v2.6.0+](https://img.shields.io/badge/Antigravity%20IDE-v2.6.0%2B-purple.svg)]()
@@ -15,6 +15,16 @@ A minimalist, native companion extension for **Google Antigravity IDE (v2.6.0+)*
   <br />
   <em>Minimalist Status Bar &amp; Hover Controls: View real-time multi-model quotas (Gemini, Claude/GPT, Argon, Carbon) and switch Global Permissions or Plan Review Policy in 1 click.</em>
 </p>
+
+---
+
+## What's New in v1.2.4
+
+- **Model Credits Display (Antigravity IDE v2.8.0+)**:
+  - Automatically reads `Available AI credits` (`GOOGLE_ONE_AI`) from `GetUserStatus` and `useAiCredits` overage status from `~/.gemini/config/config.json`.
+  - Cleanly displays **Model Credits** (`Available AI credits` + Overages `ON`/`OFF`) in the **Hover Tooltip**, **Sidebar**, and **Dashboard** only when your account has a positive credit balance (`> 0`).
+- **Enhanced Tier Detection (Free / Plus / Pro / Ultra / Enterprise)**:
+  - Prioritizes `userTier.name` / `userTier.id` from Antigravity v2.8.0+ while keeping unified `PRO` normalization.
 
 ---
 
@@ -129,7 +139,7 @@ Adapts automatically to whatever plan and model groups your account has:
 3. Click **Install**.
 
 ### Method 2: Install from `.vsix` Release
-1. Download `antigravity-quota-autopilot-1.2.3.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
+1. Download `antigravity-quota-autopilot-1.2.4.vsix` from [GitHub Releases](https://github.com/San-chanadach/antigravity-quota-autopilot/releases).
 2. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) -> **Extensions: Install from VSIX...**.
 3. Select the `.vsix` file and reload the window.
 

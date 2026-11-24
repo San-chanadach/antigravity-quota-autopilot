@@ -43,6 +43,9 @@ export interface ParsedQuotaInfo {
   userName?: string;
   planName?: string;
   accountTier?: AccountTier;
+  availableAiCredits?: number;
+  minimumCreditAmountForUsage?: number;
+  useAiCredits?: boolean;
 }
 
 export interface ActivityLogEntry {

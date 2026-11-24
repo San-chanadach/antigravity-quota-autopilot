@@ -38,6 +38,8 @@ interface UserStatusResult {
   name?: string;
   email?: string;
   planName?: string;
+  availableAiCredits?: number;
+  minimumCreditAmountForUsage?: number;
   rawUserStatus?: any;
 }
 
@@ -846,13 +848,17 @@ export class QuotaService extends EventEmitter {
                 const parsed = JSON.parse(data);
                 const user = parsed.userStatus;
                 if (user) {
+                  const credits = QuotaService.extractAiCredits(user);
                   resolve({
                     name: user.name,
                     email: user.email,
                     planName:
-                      user.planStatus?.planInfo?.planName ||
                       user.userTier?.name ||
+                      user.userTier?.id ||
+                      user.planStatus?.planInfo?.planName ||
                       user.plan,
+                    availableAiCredits: credits.availableAiCredits,
+                    minimumCreditAmountForUsage: credits.minimumCreditAmountForUsage,
                     rawUserStatus: user,
                   });
                   return;
@@ -1050,9 +1056,64 @@ export class QuotaService extends EventEmitter {
     });
   }
 
+  /**
+   * Extracts Google One AI credit balance from GetUserStatus.userTier.availableCredits
+   * using the exact Antigravity IDE v2.8.0+ schema (creditType === 'GOOGLE_ONE_AI' | 1).
+   */
+  public static extractAiCredits(rawUserStatus: any): {
+    availableAiCredits?: number;
+    minimumCreditAmountForUsage?: number;
+  } {
+    const credits = rawUserStatus?.userTier?.availableCredits;
+    if (!Array.isArray(credits) || credits.length === 0) {
+      return {};
+    }
+
+    const entry =
+      credits.find(
+        (c: any) =>
+          c &&
+          (c.creditType === 'GOOGLE_ONE_AI' ||
+            c.creditType === 1 ||
+            String(c.creditType || '').toUpperCase().includes('GOOGLE_ONE_AI'))
+      ) || credits[0];
+
+    if (!entry) return {};
+
+    const rawAmount = entry.creditAmount ?? entry.credit_amount;
+    const availableAiCredits =
+      rawAmount !== undefined && rawAmount !== null && rawAmount !== ''
+        ? Number(rawAmount)
+        : 0;
+
+    const rawMin = entry.minimumCreditAmountForUsage ?? entry.minimum_credit_amount_for_usage;
+    const minimumCreditAmountForUsage =
+      rawMin !== undefined && rawMin !== null && rawMin !== '' ? Number(rawMin) : undefined;
+
+    return {
+      availableAiCredits: Number.isFinite(availableAiCredits) ? availableAiCredits : 0,
+      minimumCreditAmountForUsage:
+        minimumCreditAmountForUsage !== undefined && Number.isFinite(minimumCreditAmountForUsage)
+          ? minimumCreditAmountForUsage
+          : undefined,
+    };
+  }
+
+  private readUseAiCreditsSetting(): boolean | undefined {
+    try {
+      const cfgPath = path.join(os.homedir(), '.gemini', 'config', 'config.json');
+      if (!fs.existsSync(cfgPath)) return undefined;
+      const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      const val = raw?.userSettings?.useAiCredits;
+      return typeof val === 'boolean' ? val : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private parseQuotaResponse(
     data: QuotaSummaryResponse,
-    userInfo?: { name?: string; email?: string; planName?: string } | null
+    userInfo?: UserStatusResult | null
   ): ParsedQuotaInfo {
     const rawGroups: QuotaGroup[] = data.response?.groups || (data as any).groups || [];
     // Keep only groups that actually possess at least one bucket (prevents --% on Free/custom plans)
@@ -1087,6 +1148,7 @@ export class QuotaService extends EventEmitter {
 
     const accountTier = QuotaService.detectAccountTier(userInfo?.planName, groups);
     const normalizedPlanName = QuotaService.getNormalizedPlanLabel(accountTier, userInfo?.planName);
+    const useAiCredits = this.readUseAiCreditsSetting();
 
     return {
       groups,
@@ -1098,6 +1160,9 @@ export class QuotaService extends EventEmitter {
       userName: userInfo?.name,
       planName: normalizedPlanName || undefined,
       accountTier,
+      availableAiCredits: userInfo?.availableAiCredits,
+      minimumCreditAmountForUsage: userInfo?.minimumCreditAmountForUsage,
+      useAiCredits,
     };
   }
 
